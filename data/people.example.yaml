@@ -1,0 +1,8 @@
+people:
+  example_person:
+    name: 示例群友
+    qq_ids:
+      - "123456789"
+      - "987654321"
+    aliases:
+      - 示例昵称

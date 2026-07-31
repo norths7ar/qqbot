@@ -1,0 +1,32 @@
+# Local configuration and secrets
+.env
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python caches and build artifacts
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local bot data and identity mapping
+data/people.yaml
+data/*.db
+data/*.db-*
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
