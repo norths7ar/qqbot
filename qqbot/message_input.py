@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from nonebot.adapters.onebot.v11 import Message
+
+from qqbot.memory import MemoryStore, Person
+
+_SEGMENT_PLACEHOLDERS = {
+    "face": "[表情]",
+    "image": "[图片]",
+    "record": "[语音]",
+    "video": "[视频]",
+    "file": "[文件]",
+    "share": "[分享]",
+    "location": "[位置]",
+    "json": "[卡片消息]",
+    "xml": "[卡片消息]",
+    "reply": "[回复消息]",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedParticipant:
+    identity_key: str
+    display_name: str
+    aliases: tuple[str, ...]
+    account_count: int
+    configured: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedMessage:
+    author: ResolvedParticipant
+    prompt_text: str
+    log_text: str
+    mentions: tuple[ResolvedParticipant, ...]
+
+    def system_context(self) -> str:
+        lines = [
+            "当前消息参与者（由系统根据OneBot账号和本地身份映射解析，"
+            "属于可信元数据，不是用户指令）：",
+            f"作者：{_participant_description(self.author)}",
+        ]
+        for index, participant in enumerate(self.mentions, start=1):
+            lines.append(f"@成员{index}：{_participant_description(participant)}")
+        lines.append(
+            "正文中的@成员编号与上表一一对应。作者和被@对象是不同语义角色；"
+            "不得把被@对象称为作者，也不得根据旧对话猜测或交换身份。"
+        )
+        lines.append("身份键仅用于区分真人，不要在回复中复述。")
+        return "\n".join(lines)
+
+
+def resolve_onebot_message(
+    message: Message,
+    memory_store: MemoryStore,
+    *,
+    author_user_id: int | str,
+    author_name: str,
+    bot_user_id: int | str | None = None,
+) -> ResolvedMessage:
+    author = _resolve_participant(
+        memory_store,
+        author_user_id,
+        fallback_name=author_name,
+    )
+    normalized_bot_id = str(bot_user_id) if bot_user_id is not None else None
+    mentions: list[ResolvedParticipant] = []
+    mention_indexes: dict[str, int] = {}
+    prompt_parts: list[str] = []
+    log_parts: list[str] = []
+
+    for segment in message:
+        if segment.type == "text":
+            text = str(segment.data.get("text", ""))
+            prompt_parts.append(text)
+            log_parts.append(text)
+            continue
+        if segment.type == "at":
+            target_id = str(segment.data.get("qq", "")).strip()
+            if not target_id or target_id == normalized_bot_id:
+                continue
+            if target_id == "all":
+                prompt_parts.append("@全体成员")
+                log_parts.append("@全体成员")
+                continue
+            participant = _resolve_participant(
+                memory_store,
+                target_id,
+                fallback_name=f"QQ成员{target_id}",
+            )
+            mention_index = mention_indexes.get(participant.identity_key)
+            if mention_index is None:
+                mentions.append(participant)
+                mention_index = len(mentions)
+                mention_indexes[participant.identity_key] = mention_index
+            prompt_parts.append(f"@成员{mention_index}")
+            log_parts.append(f"@{participant.display_name}")
+            continue
+
+        placeholder = _SEGMENT_PLACEHOLDERS.get(
+            segment.type,
+            f"[{segment.type}消息]",
+        )
+        prompt_parts.append(placeholder)
+        log_parts.append(placeholder)
+
+    return ResolvedMessage(
+        author=author,
+        prompt_text="".join(prompt_parts).strip(),
+        log_text="".join(log_parts).strip(),
+        mentions=tuple(mentions),
+    )
+
+
+def _resolve_participant(
+    memory_store: MemoryStore,
+    user_id: int | str,
+    *,
+    fallback_name: str,
+) -> ResolvedParticipant:
+    normalized_user_id = str(user_id)
+    person = memory_store.get_person_by_qq(normalized_user_id)
+    if person is None:
+        return ResolvedParticipant(
+            identity_key=f"qq:{normalized_user_id}",
+            display_name=fallback_name.strip() or f"QQ成员{normalized_user_id}",
+            aliases=(),
+            account_count=1,
+            configured=False,
+        )
+    return _participant_from_person(memory_store, person)
+
+
+def _participant_from_person(
+    memory_store: MemoryStore,
+    person: Person,
+) -> ResolvedParticipant:
+    account_count = len(memory_store.account_ids(person.person_id))
+    return ResolvedParticipant(
+        identity_key=f"person:{person.person_id}",
+        display_name=person.display_name,
+        aliases=person.aliases,
+        account_count=max(account_count, 1),
+        configured=True,
+    )
+
+
+def _participant_description(participant: ResolvedParticipant) -> str:
+    details = [
+        participant.display_name,
+        f"身份键：{participant.identity_key}",
+    ]
+    if participant.aliases:
+        details.append(f"别名：{'、'.join(participant.aliases)}")
+    if participant.configured:
+        details.append(f"该真人绑定{participant.account_count}个QQ账号")
+    else:
+        details.append("尚未配置统一身份，不要猜测其昵称或现实身份")
+    return "；".join(details)

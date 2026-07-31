@@ -9,6 +9,7 @@ dependencies = [
     "nonebot2[fastapi]>=2.5.0",
     "nonebot-adapter-onebot>=2.4.6",
     "httpx>=0.28,<1.0",
+    "nonebot-plugin-apscheduler==0.5.0",
     "nonebot-plugin-htmlrender==0.7.2",
     "nonebot-plugin-jrrp3==3.4.0",
     "nonebot-plugin-multi-source-daily==0.3.0",

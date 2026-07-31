@@ -8,6 +8,7 @@ from nonebot.rule import Rule
 
 from qqbot.memory import MemoryEntry, Person
 from qqbot.memory_runtime import memory_store
+from qqbot.menu import build_menu
 from qqbot.news import strip_unavailable_detail_hint
 
 require("nonebot_plugin_jrrp3")
@@ -109,30 +110,7 @@ async def _target_person(
 
 @menu.handle()
 async def handle_menu(event: GroupMessageEvent) -> None:
-    lines = [
-        "可用功能",
-        "",
-        "/天气 城市",
-        "/运势 [今日|本周|本月|平均]",
-        "/新闻 [60秒|知乎|微博]",
-        "/清空对话",
-        "/我的记忆",
-        "/忘记我 确认",
-        "",
-        "其他内容请直接 @我。",
-    ]
-    if _is_superuser(event.user_id):
-        lines.extend(
-            [
-                "",
-                "管理员记忆命令",
-                "/记住 @群友 内容",
-                "/查看记忆 @群友",
-                "/删除记忆 编号",
-                "/清空本群对话",
-            ]
-        )
-    await menu.finish("\n".join(lines))
+    await menu.finish(build_menu(is_superuser=_is_superuser(event.user_id)))
 
 
 @fortune.handle()
