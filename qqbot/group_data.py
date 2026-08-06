@@ -7,25 +7,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from qqbot.sqlite_schema import ensure_column
+
 
 @dataclass(frozen=True, slots=True)
 class GroupMessageRecord:
+    message_id: int
     group_id: int
     user_id: int
+    person_id: str
     user_name: str
     content: str
     sent_at: str
-
-
-@dataclass(frozen=True, slots=True)
-class Reminder:
-    reminder_id: int
-    group_id: int
-    user_id: int
-    user_name: str
-    content: str
-    due_at: str
-    created_at: str
+    speaker_role: str
 
 
 class GroupDataStore:
@@ -57,20 +51,21 @@ class GroupDataStore:
                 CREATE INDEX IF NOT EXISTS idx_group_messages_group_time
                     ON group_messages(group_id, message_id);
 
-                CREATE TABLE IF NOT EXISTS reminders (
-                    reminder_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    group_id INTEGER NOT NULL,
-                    user_id INTEGER NOT NULL,
-                    user_name TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    due_at TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    delivered_at TEXT
+                CREATE TABLE IF NOT EXISTS memory_extraction_state (
+                    group_id INTEGER PRIMARY KEY,
+                    last_message_id INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL
                 );
-
-                CREATE INDEX IF NOT EXISTS idx_reminders_due
-                    ON reminders(delivered_at, due_at);
                 """
+            )
+            ensure_column(
+                connection, "group_messages", "person_id", "TEXT NOT NULL DEFAULT ''"
+            )
+            ensure_column(
+                connection,
+                "group_messages",
+                "speaker_role",
+                "TEXT NOT NULL DEFAULT 'human'",
             )
 
     def record_message(
@@ -80,26 +75,31 @@ class GroupDataStore:
         user_name: str,
         content: str,
         *,
+        person_id: str | None = None,
+        speaker_role: str = "human",
         sent_at: datetime | None = None,
-    ) -> None:
+    ) -> int | None:
         normalized = " ".join(content.split())
         if not normalized:
-            return
+            return None
         timestamp = (sent_at or datetime.now(UTC)).astimezone(UTC)
         with self._connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 INSERT INTO group_messages(
-                    group_id, user_id, user_name, content, sent_at
+                    group_id, user_id, person_id, user_name, content, sent_at,
+                    speaker_role
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     group_id,
                     user_id,
+                    person_id or f"qq_{user_id}",
                     user_name.strip() or str(user_id),
                     normalized[:4000],
                     timestamp.isoformat(timespec="seconds"),
+                    speaker_role,
                 ),
             )
             connection.execute(
@@ -115,6 +115,7 @@ class GroupDataStore:
                 """,
                 (group_id, group_id, self.max_messages_per_group),
             )
+            return int(cursor.lastrowid)
 
     def recent_messages(
         self,
@@ -127,9 +128,11 @@ class GroupDataStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT group_id, user_id, user_name, content, sent_at
+                SELECT message_id, group_id, user_id, person_id, user_name,
+                       content, sent_at, speaker_role
                 FROM (
-                    SELECT message_id, group_id, user_id, user_name, content, sent_at
+                    SELECT message_id, group_id, user_id, person_id, user_name,
+                           content, sent_at, speaker_role
                     FROM group_messages
                     WHERE group_id = ?
                     ORDER BY message_id DESC
@@ -141,11 +144,14 @@ class GroupDataStore:
             ).fetchall()
         return [
             GroupMessageRecord(
+                message_id=int(row["message_id"]),
                 group_id=int(row["group_id"]),
                 user_id=int(row["user_id"]),
+                person_id=str(row["person_id"]),
                 user_name=str(row["user_name"]),
                 content=str(row["content"]),
                 sent_at=str(row["sent_at"]),
+                speaker_role=str(row["speaker_role"]),
             )
             for row in rows
         ]
@@ -158,114 +164,46 @@ class GroupDataStore:
             )
         return cursor.rowcount
 
-    def create_reminder(
+    def unprocessed_human_messages(
         self,
         group_id: int,
-        user_id: int,
-        user_name: str,
-        content: str,
-        due_at: datetime,
-    ) -> Reminder:
-        normalized = " ".join(content.split())
-        if not normalized:
-            raise ValueError("提醒内容不能为空")
-        due_utc = due_at.astimezone(UTC)
-        if due_utc <= datetime.now(UTC):
-            raise ValueError("提醒时间必须晚于现在")
-        created_at = datetime.now(UTC).isoformat(timespec="seconds")
-        with self._connect() as connection:
-            cursor = connection.execute(
-                """
-                INSERT INTO reminders(
-                    group_id, user_id, user_name, content, due_at, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    group_id,
-                    user_id,
-                    user_name.strip() or str(user_id),
-                    normalized[:500],
-                    due_utc.isoformat(timespec="seconds"),
-                    created_at,
-                ),
-            )
-            reminder_id = cursor.lastrowid
-        if reminder_id is None:
-            raise RuntimeError("failed to create reminder")
-        return Reminder(
-            reminder_id=reminder_id,
-            group_id=group_id,
-            user_id=user_id,
-            user_name=user_name,
-            content=normalized[:500],
-            due_at=due_utc.isoformat(timespec="seconds"),
-            created_at=created_at,
-        )
-
-    def list_reminders(self, group_id: int, user_id: int) -> list[Reminder]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT reminder_id, group_id, user_id, user_name,
-                       content, due_at, created_at
-                FROM reminders
-                WHERE group_id = ? AND user_id = ? AND delivered_at IS NULL
-                ORDER BY due_at
-                """,
-                (group_id, user_id),
-            ).fetchall()
-        return [self._reminder_from_row(row) for row in rows]
-
-    def cancel_reminder(self, reminder_id: int, group_id: int, user_id: int) -> bool:
-        with self._connect() as connection:
-            cursor = connection.execute(
-                """
-                DELETE FROM reminders
-                WHERE reminder_id = ? AND group_id = ? AND user_id = ?
-                      AND delivered_at IS NULL
-                """,
-                (reminder_id, group_id, user_id),
-            )
-        return cursor.rowcount > 0
-
-    def claim_due_reminders(
-        self,
         *,
-        now: datetime | None = None,
-        limit: int = 20,
-    ) -> list[Reminder]:
-        current = (now or datetime.now(UTC)).astimezone(UTC)
-        claimed_at = current.isoformat(timespec="seconds")
+        limit: int,
+    ) -> list[GroupMessageRecord]:
         with self._connect() as connection:
+            state = connection.execute(
+                "SELECT last_message_id FROM memory_extraction_state "
+                "WHERE group_id = ?",
+                (group_id,),
+            ).fetchone()
+            after_id = int(state["last_message_id"]) if state else 0
             rows = connection.execute(
                 """
-                SELECT reminder_id, group_id, user_id, user_name,
-                       content, due_at, created_at
-                FROM reminders
-                WHERE delivered_at IS NULL AND due_at <= ?
-                ORDER BY due_at
+                SELECT message_id, group_id, user_id, person_id, user_name,
+                       content, sent_at, speaker_role
+                FROM group_messages
+                WHERE group_id = ? AND message_id > ? AND speaker_role = 'human'
+                ORDER BY message_id
                 LIMIT ?
                 """,
-                (claimed_at, limit),
+                (group_id, after_id, limit),
             ).fetchall()
-            if rows:
-                placeholders = ",".join("?" for _ in rows)
-                connection.execute(
-                    f"""
-                    UPDATE reminders
-                    SET delivered_at = ?
-                    WHERE reminder_id IN ({placeholders})
-                    """,
-                    (claimed_at, *(int(row["reminder_id"]) for row in rows)),
-                )
-        return [self._reminder_from_row(row) for row in rows]
+        return [self._message_from_row(row) for row in rows]
 
-    def restore_reminder(self, reminder_id: int) -> None:
+    def mark_memory_processed(self, group_id: int, message_id: int) -> None:
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         with self._connect() as connection:
             connection.execute(
-                "UPDATE reminders SET delivered_at = NULL WHERE reminder_id = ?",
-                (reminder_id,),
+                """
+                INSERT INTO memory_extraction_state(
+                    group_id, last_message_id, updated_at
+                )
+                VALUES (?, ?, ?)
+                ON CONFLICT(group_id) DO UPDATE SET
+                    last_message_id = MAX(last_message_id, excluded.last_message_id),
+                    updated_at = excluded.updated_at
+                """,
+                (group_id, message_id, now),
             )
 
     @contextmanager
@@ -279,13 +217,14 @@ class GroupDataStore:
             connection.close()
 
     @staticmethod
-    def _reminder_from_row(row: sqlite3.Row) -> Reminder:
-        return Reminder(
-            reminder_id=int(row["reminder_id"]),
+    def _message_from_row(row: sqlite3.Row) -> GroupMessageRecord:
+        return GroupMessageRecord(
+            message_id=int(row["message_id"]),
             group_id=int(row["group_id"]),
             user_id=int(row["user_id"]),
+            person_id=str(row["person_id"]),
             user_name=str(row["user_name"]),
             content=str(row["content"]),
-            due_at=str(row["due_at"]),
-            created_at=str(row["created_at"]),
+            sent_at=str(row["sent_at"]),
+            speaker_role=str(row["speaker_role"]),
         )

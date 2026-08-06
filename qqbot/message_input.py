@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from nonebot.adapters.onebot.v11 import Message
+from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 from qqbot.memory import MemoryStore, Person
 
@@ -35,6 +36,8 @@ class ResolvedMessage:
     prompt_text: str
     log_text: str
     mentions: tuple[ResolvedParticipant, ...]
+    image_urls: tuple[str, ...]
+    reply_message_id: int | None
 
     def system_context(self) -> str:
         lines = [
@@ -70,6 +73,8 @@ def resolve_onebot_message(
     mention_indexes: dict[str, int] = {}
     prompt_parts: list[str] = []
     log_parts: list[str] = []
+    image_urls: list[str] = []
+    reply_message_id: int | None = None
 
     for segment in message:
         if segment.type == "text":
@@ -98,6 +103,20 @@ def resolve_onebot_message(
             prompt_parts.append(f"@成员{mention_index}")
             log_parts.append(f"@{participant.display_name}")
             continue
+        if segment.type == "image":
+            image_url = _image_url(segment.data)
+            if image_url and image_url not in image_urls:
+                image_urls.append(image_url)
+            prompt_parts.append("[图片]")
+            log_parts.append("[图片]")
+            continue
+        if segment.type == "reply":
+            raw_reply_id = str(segment.data.get("id", "")).strip()
+            if raw_reply_id.isdigit():
+                reply_message_id = int(raw_reply_id)
+            prompt_parts.append("[回复消息]")
+            log_parts.append("[回复消息]")
+            continue
 
         placeholder = _SEGMENT_PLACEHOLDERS.get(
             segment.type,
@@ -111,7 +130,52 @@ def resolve_onebot_message(
         prompt_text="".join(prompt_parts).strip(),
         log_text="".join(log_parts).strip(),
         mentions=tuple(mentions),
+        image_urls=tuple(image_urls),
+        reply_message_id=reply_message_id,
     )
+
+
+def image_urls_from_message(message: Message) -> tuple[str, ...]:
+    urls: list[str] = []
+    for segment in message:
+        if segment.type != "image":
+            continue
+        image_url = _image_url(segment.data)
+        if image_url and image_url not in urls:
+            urls.append(image_url)
+    return tuple(urls)
+
+
+def message_from_onebot_api(raw_message: object) -> Message | None:
+    """Convert a OneBot API message payload without assuming adapter internals."""
+    if isinstance(raw_message, Message):
+        return raw_message
+    if isinstance(raw_message, str):
+        return Message(raw_message)
+    if not isinstance(raw_message, Sequence):
+        return None
+
+    segments: list[MessageSegment] = []
+    for raw_segment in raw_message:
+        if isinstance(raw_segment, MessageSegment):
+            segments.append(raw_segment)
+            continue
+        if not isinstance(raw_segment, Mapping):
+            continue
+        segment_type = str(raw_segment.get("type", "")).strip()
+        segment_data = raw_segment.get("data")
+        if not segment_type or not isinstance(segment_data, Mapping):
+            continue
+        segments.append(MessageSegment(segment_type, dict(segment_data)))
+    return Message(segments) if segments else None
+
+
+def _image_url(data: dict[str, object]) -> str:
+    for field in ("url", "file"):
+        value = str(data.get(field, "")).strip()
+        if value.startswith(("http://", "https://")):
+            return value
+    return ""
 
 
 def _resolve_participant(

@@ -1,34 +1,27 @@
 from __future__ import annotations
 
 
-def build_menu(*, is_superuser: bool) -> str:
+def build_menu(*, is_superuser: bool, history_today_enabled: bool = True) -> str:
     lines = [
         "使用方式",
         "",
         "平时直接 @我。要稳定调用功能，请在功能名后加空格和参数，例如：",
-        "@我 天气 北京",
-        "@我 提醒 30分钟后关火",
         "@我 总结 50",
         "",
         "功能",
         "菜单",
-        "天气 城市",
-        "运势 [今日|本周|本月|平均]",
-        "新闻 [60秒|知乎|微博]",
-        "新闻详情 [知乎|微博] 序号",
         "搜索 关键词",
-        "历史上的今天",
-        "提醒 时间 内容",
-        "提醒列表",
-        "取消提醒 编号",
         "总结 [消息条数]",
         "清空对话",
         "我的记忆",
         "忘记我 确认",
         "",
-        "以上功能也可使用 / 前缀，例如：/天气 北京。",
+        "以上功能也可使用 / 前缀，例如：/搜索 关键词。",
         "发送 B 站链接或 BV 号会自动解析。",
     ]
+    if history_today_enabled:
+        history_position = lines.index("总结 [消息条数]")
+        lines.insert(history_position, "历史上的今天")
     if is_superuser:
         lines.extend(
             [

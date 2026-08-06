@@ -5,7 +5,11 @@ from pathlib import Path
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 from qqbot.memory import MemoryStore
-from qqbot.message_input import resolve_onebot_message
+from qqbot.message_input import (
+    image_urls_from_message,
+    message_from_onebot_api,
+    resolve_onebot_message,
+)
 
 
 class OneBotMessageResolutionTests(unittest.TestCase):
@@ -134,6 +138,74 @@ people:
 
         self.assertEqual(resolved.prompt_text, "[图片]这张图")
         self.assertEqual(resolved.log_text, "[图片]这张图")
+        self.assertEqual(
+            resolved.image_urls,
+            ("https://example.com/image.jpg",),
+        )
+
+    def test_extracts_reply_id_without_treating_it_as_text(self) -> None:
+        resolved = self.resolve(
+            Message(
+                [
+                    MessageSegment("reply", {"id": "12345"}),
+                    MessageSegment.text("看看原图"),
+                ]
+            )
+        )
+
+        self.assertEqual(resolved.reply_message_id, 12345)
+        self.assertEqual(resolved.prompt_text, "[回复消息]看看原图")
+
+    def test_image_helper_ignores_non_http_file_identifiers(self) -> None:
+        message = Message(
+            [
+                MessageSegment("image", {"file": "local-cache-key"}),
+                MessageSegment(
+                    "image",
+                    {"url": "https://example.com/valid.png"},
+                ),
+                MessageSegment.text("普通文本"),
+            ]
+        )
+
+        self.assertEqual(
+            image_urls_from_message(message),
+            ("https://example.com/valid.png",),
+        )
+
+    def test_converts_onebot_api_segment_dicts_before_extracting_reply_image(
+        self,
+    ) -> None:
+        raw_message = [
+            {"type": "reply", "data": {"id": "1612724925"}},
+            {
+                "type": "image",
+                "data": {
+                    "file": "cached.jpg",
+                    "url": "https://example.com/replied.jpg",
+                },
+            },
+        ]
+
+        message = message_from_onebot_api(raw_message)
+
+        self.assertIsNotNone(message)
+        assert message is not None
+        self.assertEqual(
+            image_urls_from_message(message),
+            ("https://example.com/replied.jpg",),
+        )
+
+    def test_api_message_converter_ignores_malformed_segments(self) -> None:
+        message = message_from_onebot_api(
+            [
+                {"type": "image", "data": "not-a-mapping"},
+                {"data": {"url": "https://example.com/not-used.jpg"}},
+                42,
+            ]
+        )
+
+        self.assertIsNone(message)
 
 
 if __name__ == "__main__":

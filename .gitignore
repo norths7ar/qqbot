@@ -24,6 +24,8 @@ htmlcov/
 data/people.yaml
 data/*.db
 data/*.db-*
+data/logs/
+data/runtime/
 
 # Editors and operating systems
 .idea/

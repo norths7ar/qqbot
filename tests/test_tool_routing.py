@@ -5,21 +5,13 @@ from qqbot.tool_routing import FunctionCall, is_explicit_command, parse_function
 
 class ToolRoutingTests(unittest.TestCase):
     def test_recognizes_explicit_command_after_mention_whitespace(self) -> None:
-        self.assertTrue(is_explicit_command("  /天气 北京"))
+        self.assertTrue(is_explicit_command("  /任意命令 参数"))
         self.assertFalse(is_explicit_command("天气 北京"))
 
     def test_parses_registered_function_and_preserves_arguments(self) -> None:
         self.assertEqual(
-            parse_function_call("天气 北京"),
-            FunctionCall(name="weather", arguments="北京"),
-        )
-        self.assertEqual(
-            parse_function_call("提醒  30分钟后 关火"),
-            FunctionCall(name="create_reminder", arguments="30分钟后 关火"),
-        )
-        self.assertEqual(
-            parse_function_call("查询天气 上海"),
-            FunctionCall(name="weather", arguments="上海"),
+            parse_function_call("搜索 北京"),
+            FunctionCall(name="search", arguments="北京"),
         )
 
     def test_parses_no_argument_function(self) -> None:

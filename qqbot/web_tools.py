@@ -80,7 +80,7 @@ class TavilyClient:
             )
         safe_url = _safe_http_url(url)
         if not safe_url:
-            return "新闻链接无效。"
+            return "网页链接无效。"
         payload: dict[str, object] = {
             "urls": [safe_url],
             "extract_depth": "basic",

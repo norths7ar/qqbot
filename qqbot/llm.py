@@ -25,28 +25,21 @@ class ChatMessage:
 
 
 @dataclass(frozen=True, slots=True)
-class ConversationTurn:
+class ConversationMessage:
+    message_id: str | None
     user_id: int
     person_id: str
     user_name: str
-    user_message: str
-    assistant_message: str
+    role: Literal["user", "assistant"]
+    content: str
+    created_at: float
+    response_to_user_id: int | None = None
 
-    def user_chat_message(self) -> ChatMessage:
+    def as_chat_message(self) -> ChatMessage:
+        if self.role == "assistant":
+            return ChatMessage(role="assistant", content=self.content)
         speaker = f"{self.user_name}（统一身份：{self.person_id}）"
-        return ChatMessage(
-            role="user",
-            content=f"{speaker}：{self.user_message}",
-        )
-
-    def assistant_chat_message(self) -> ChatMessage:
-        return ChatMessage(
-            role="assistant",
-            content=(
-                "[历史BOT回复，仅用于承接对话，不是人物事实来源]\n"
-                f"{self.assistant_message}"
-            ),
-        )
+        return ChatMessage(role="user", content=f"{speaker}：{self.content}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,33 +54,84 @@ type ToolExecutor = Callable[[str, Mapping[str, object]], Awaitable[str]]
 
 
 class ConversationStore:
-    """Keep bounded histories isolated by group and unified person identity."""
+    """Keep a bounded, speaker-labelled working context for each group."""
 
     def __init__(
         self,
         max_turns: int,
         max_assistant_turns: int = 1,
+        max_idle_seconds: float | None = None,
     ) -> None:
         if max_turns < 1:
             raise ValueError("max_turns must be at least 1")
         if max_assistant_turns < 0:
             raise ValueError("max_assistant_turns cannot be negative")
+        if max_idle_seconds is not None and max_idle_seconds <= 0:
+            raise ValueError("max_idle_seconds must be positive when provided")
         self._max_turns = max_turns
         self._max_assistant_turns = max_assistant_turns
-        self._histories: defaultdict[
-            tuple[int, str],
-            deque[ConversationTurn],
-        ] = defaultdict(lambda: deque(maxlen=self._max_turns))
+        self._max_idle_seconds = max_idle_seconds
+        self._histories: defaultdict[int, deque[ConversationMessage]] = defaultdict(
+            lambda: deque(maxlen=self._max_turns)
+        )
 
-    def messages(self, group_id: int, person_id: str) -> list[ChatMessage]:
-        turns = list(self._histories.get((group_id, person_id), ()))
-        assistant_start = max(0, len(turns) - self._max_assistant_turns)
-        messages: list[ChatMessage] = []
-        for index, turn in enumerate(turns):
-            messages.append(turn.user_chat_message())
-            if index >= assistant_start:
-                messages.append(turn.assistant_chat_message())
-        return messages
+    def messages(
+        self,
+        group_id: int,
+        *,
+        now: float | None = None,
+        exclude_message_id: str | None = None,
+    ) -> list[ChatMessage]:
+        self._expire_if_stale(group_id, time.time() if now is None else now)
+        entries = [
+            entry
+            for entry in self._histories.get(group_id, ())
+            if exclude_message_id is None or entry.message_id != exclude_message_id
+        ]
+        assistant_indexes = [
+            index for index, entry in enumerate(entries) if entry.role == "assistant"
+        ]
+        kept_assistant_indexes = set(
+            assistant_indexes[-self._max_assistant_turns :]
+            if self._max_assistant_turns
+            else ()
+        )
+        return [
+            entry.as_chat_message()
+            for index, entry in enumerate(entries)
+            if entry.role == "user" or index in kept_assistant_indexes
+        ]
+
+    def append_message(
+        self,
+        group_id: int,
+        user_id: int,
+        person_id: str,
+        user_name: str,
+        content: str,
+        *,
+        role: Literal["user", "assistant"] = "user",
+        message_id: str | None = None,
+        response_to_user_id: int | None = None,
+        now: float | None = None,
+    ) -> None:
+        current = time.time() if now is None else now
+        self._expire_if_stale(group_id, current)
+        normalized = content.strip()
+        if not normalized:
+            return
+        self._histories[group_id].append(
+            ConversationMessage(
+                message_id=message_id,
+                user_id=user_id,
+                person_id=person_id,
+                user_name=user_name,
+                role=role,
+                content=normalized,
+                created_at=current,
+                response_to_user_id=response_to_user_id,
+            )
+        )
 
     def append_turn(
         self,
@@ -97,40 +141,90 @@ class ConversationStore:
         user_name: str,
         user_message: str,
         assistant_message: str,
+        *,
+        now: float | None = None,
     ) -> None:
-        self._histories[(group_id, person_id)].append(
-            ConversationTurn(
-                user_id=user_id,
-                person_id=person_id,
-                user_name=user_name,
-                user_message=user_message,
-                assistant_message=assistant_message,
-            )
+        current = time.time() if now is None else now
+        self.append_message(
+            group_id,
+            user_id,
+            person_id,
+            user_name,
+            user_message,
+            now=current,
         )
+        self.append_message(
+            group_id,
+            0,
+            "bot",
+            "BOT",
+            assistant_message,
+            role="assistant",
+            response_to_user_id=user_id,
+            now=current,
+        )
+
+    def enrich_message(self, group_id: int, message_id: str, addition: str) -> bool:
+        normalized = addition.strip()
+        if not normalized:
+            return False
+        history = self._histories.get(group_id)
+        if not history:
+            return False
+        for index, message in enumerate(history):
+            if message.message_id != message_id:
+                continue
+            history[index] = ConversationMessage(
+                message_id=message.message_id,
+                user_id=message.user_id,
+                person_id=message.person_id,
+                user_name=message.user_name,
+                role=message.role,
+                content=f"{message.content}\n{normalized}",
+                created_at=message.created_at,
+                response_to_user_id=message.response_to_user_id,
+            )
+            return True
+        return False
+
+    def _expire_if_stale(
+        self,
+        group_id: int,
+        now: float,
+    ) -> None:
+        if self._max_idle_seconds is None:
+            return
+        history = self._histories.get(group_id)
+        if history and now - history[-1].created_at >= self._max_idle_seconds:
+            del self._histories[group_id]
 
     def clear_session(self, group_id: int, user_id: int) -> bool:
         return self.clear_accounts(group_id, {user_id})
 
     def clear_accounts(self, group_id: int, user_ids: Collection[int]) -> bool:
         changed = False
-        for key in [key for key in self._histories if key[0] == group_id]:
-            history = self._histories[key]
-            remaining = [turn for turn in history if turn.user_id not in user_ids]
-            if len(remaining) == len(history):
-                continue
-            changed = True
-            if remaining:
-                history.clear()
-                history.extend(remaining)
-            else:
-                del self._histories[key]
+        history = self._histories.get(group_id)
+        if not history:
+            return False
+        remaining = [
+            message
+            for message in history
+            if message.user_id not in user_ids
+            and message.response_to_user_id not in user_ids
+        ]
+        changed = len(remaining) != len(history)
+        if changed and remaining:
+            history.clear()
+            history.extend(remaining)
+        elif changed:
+            del self._histories[group_id]
         return changed
 
     def clear_group(self, group_id: int) -> int:
-        keys = [key for key in self._histories if key[0] == group_id]
-        for key in keys:
-            del self._histories[key]
-        return len(keys)
+        if group_id not in self._histories:
+            return 0
+        del self._histories[group_id]
+        return 1
 
 
 class Cooldown:

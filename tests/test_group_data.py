@@ -1,6 +1,5 @@
 import tempfile
 import unittest
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from qqbot.group_data import GroupDataStore
@@ -26,35 +25,6 @@ class GroupDataStoreTests(unittest.TestCase):
         self.assertEqual(
             [message.content for message in messages], ["第一条", "第二条"]
         )
-
-    def test_reminders_survive_until_claimed(self) -> None:
-        now = datetime.now(UTC)
-        reminder = self.store.create_reminder(
-            1,
-            10,
-            "甲",
-            "关火",
-            now + timedelta(minutes=5),
-        )
-
-        self.assertEqual(len(self.store.list_reminders(1, 10)), 1)
-        self.assertEqual(
-            self.store.claim_due_reminders(now=now + timedelta(minutes=6)),
-            [reminder],
-        )
-        self.assertEqual(self.store.list_reminders(1, 10), [])
-
-    def test_user_cannot_cancel_another_users_reminder(self) -> None:
-        reminder = self.store.create_reminder(
-            1,
-            10,
-            "甲",
-            "关火",
-            datetime.now(UTC) + timedelta(minutes=5),
-        )
-
-        self.assertFalse(self.store.cancel_reminder(reminder.reminder_id, 1, 11))
-        self.assertTrue(self.store.cancel_reminder(reminder.reminder_id, 1, 10))
 
     def test_message_retention_and_clear(self) -> None:
         database_path = Path(self.temporary_directory.name) / "bounded.db"

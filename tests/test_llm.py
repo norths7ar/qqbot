@@ -2,7 +2,6 @@ import unittest
 from unittest.mock import AsyncMock
 
 from qqbot.llm import (
-    ChatMessage,
     ConversationStore,
     Cooldown,
     DeepSeekClient,
@@ -12,89 +11,97 @@ from qqbot.llm import (
 
 
 class ConversationStoreTests(unittest.TestCase):
-    def test_history_is_isolated_by_group_and_person(self) -> None:
-        store = ConversationStore(max_turns=2)
-        store.append_turn(1, 10, "xiaoming", "小明", "问题", "回答")
+    def test_group_history_contains_multiple_speakers(self) -> None:
+        store = ConversationStore(max_turns=5)
+        store.append_message(1, 10, "xiaoming", "小明", "甲的问题")
+        store.append_message(1, 11, "xiaohong", "小红", "乙的补充")
 
-        self.assertEqual(
-            store.messages(1, "xiaoming"),
-            [
-                ChatMessage(
-                    role="user",
-                    content="小明（统一身份：xiaoming）：问题",
-                ),
-                ChatMessage(
-                    role="assistant",
-                    content=("[历史BOT回复，仅用于承接对话，不是人物事实来源]\n回答"),
-                ),
-            ],
+        contents = [message.content for message in store.messages(1)]
+
+        self.assertTrue(
+            any("小明" in content and "甲的问题" in content for content in contents)
         )
-        self.assertEqual(store.messages(1, "xiaohong"), [])
-        self.assertEqual(store.messages(2, "xiaoming"), [])
+        self.assertTrue(
+            any("小红" in content and "乙的补充" in content for content in contents)
+        )
+        self.assertEqual(store.messages(2), [])
 
-    def test_history_keeps_user_turns_but_only_recent_bot_replies(self) -> None:
-        store = ConversationStore(max_turns=2, max_assistant_turns=1)
-        for index in range(3):
-            store.append_turn(
-                1,
-                10,
-                "xiaoming",
-                "小明",
-                f"问题{index}",
-                f"回答{index}",
-            )
+    def test_only_recent_bot_replies_are_kept(self) -> None:
+        store = ConversationStore(max_turns=10, max_assistant_turns=1)
+        store.append_turn(1, 10, "xiaoming", "小明", "问题1", "回答1")
+        store.append_turn(1, 11, "xiaohong", "小红", "问题2", "回答2")
 
-        self.assertEqual(
-            store.messages(1, "xiaoming"),
-            [
-                ChatMessage(
-                    role="user",
-                    content="小明（统一身份：xiaoming）：问题1",
-                ),
-                ChatMessage(
-                    role="user",
-                    content="小明（统一身份：xiaoming）：问题2",
-                ),
-                ChatMessage(
-                    role="assistant",
-                    content=("[历史BOT回复，仅用于承接对话，不是人物事实来源]\n回答2"),
-                ),
-            ],
+        contents = [message.content for message in store.messages(1)]
+
+        self.assertIn("回答2", contents)
+        self.assertNotIn("回答1", contents)
+        self.assertTrue(any("问题1" in content for content in contents))
+        self.assertTrue(any("问题2" in content for content in contents))
+
+    def test_current_message_can_be_excluded(self) -> None:
+        store = ConversationStore(max_turns=5)
+        store.append_message(1, 10, "xiaoming", "小明", "当前问题", message_id="123")
+        self.assertEqual(store.messages(1, exclude_message_id="123"), [])
+
+    def test_current_message_can_be_enriched_with_temporary_observation(self) -> None:
+        store = ConversationStore(max_turns=5)
+        store.append_message(
+            1,
+            10,
+            "xiaoming",
+            "小明",
+            "[图片]这是什么",
+            message_id="123",
         )
 
-    def test_assistant_history_can_be_disabled(self) -> None:
-        store = ConversationStore(max_turns=2, max_assistant_turns=0)
-        store.append_turn(1, 10, "xiaoming", "小明", "问题", "回答")
+        changed = store.enrich_message(1, "123", "[临时图片观察]一只猫")
+        contents = [message.content for message in store.messages(1)]
 
-        self.assertEqual(
-            store.messages(1, "xiaoming"),
-            [
-                ChatMessage(
-                    role="user",
-                    content="小明（统一身份：xiaoming）：问题",
-                )
-            ],
+        self.assertTrue(changed)
+        self.assertTrue(any("一只猫" in content for content in contents))
+        self.assertFalse(store.enrich_message(1, "missing", "不应写入"))
+
+    def test_history_expires_after_idle_timeout(self) -> None:
+        store = ConversationStore(max_turns=2, max_idle_seconds=12 * 60 * 60)
+        store.append_turn(
+            1,
+            10,
+            "xiaoming",
+            "小明",
+            "旧话题",
+            "旧回答",
+            now=100,
         )
 
-    def test_multiple_accounts_share_one_person_history(self) -> None:
-        store = ConversationStore(max_turns=2)
-        store.append_turn(1, 10, "xiaoming", "小明", "大号发言", "回答1")
-        store.append_turn(1, 12, "xiaoming", "小明", "小号发言", "回答2")
+        self.assertEqual(
+            store.messages(1, now=100 + 12 * 60 * 60),
+            [],
+        )
 
-        contents = [message.content for message in store.messages(1, "xiaoming")]
+    def test_history_survives_date_change_within_idle_timeout(self) -> None:
+        store = ConversationStore(max_turns=2, max_idle_seconds=12 * 60 * 60)
+        store.append_turn(
+            1,
+            10,
+            "xiaoming",
+            "小明",
+            "23点59分的话题",
+            "回答",
+            now=100,
+        )
 
-        self.assertTrue(any("大号发言" in content for content in contents))
-        self.assertTrue(any("小号发言" in content for content in contents))
+        contents = [message.content for message in store.messages(1, now=100 + 2 * 60)]
 
-    def test_other_people_in_same_group_do_not_enter_history(self) -> None:
-        store = ConversationStore(max_turns=2)
-        store.append_turn(1, 10, "xiaoming", "小明", "甲的问题", "回答1")
-        store.append_turn(1, 11, "xiaohong", "小红", "乙的问题", "回答2")
+        self.assertTrue(any("23点59分的话题" in content for content in contents))
 
-        contents = [message.content for message in store.messages(1, "xiaoming")]
+    def test_fresh_group_message_keeps_group_history_alive(self) -> None:
+        store = ConversationStore(max_turns=6, max_idle_seconds=60)
+        store.append_turn(1, 10, "xiaoming", "小明", "旧话题", "回答1", now=100)
+        store.append_turn(1, 11, "xiaohong", "小红", "新话题", "回答2", now=150)
 
-        self.assertTrue(any("甲的问题" in content for content in contents))
-        self.assertFalse(any("乙的问题" in content for content in contents))
+        contents = [message.content for message in store.messages(1, now=161)]
+        self.assertTrue(any("旧话题" in content for content in contents))
+        self.assertTrue(any("新话题" in content for content in contents))
 
     def test_clear_session_removes_only_one_users_turns(self) -> None:
         store = ConversationStore(max_turns=3)
@@ -103,8 +110,14 @@ class ConversationStoreTests(unittest.TestCase):
         store.append_turn(1, 11, "xiaohong", "小红", "c", "d")
 
         self.assertTrue(store.clear_accounts(1, {10, 12}))
-        self.assertEqual(store.messages(1, "xiaoming"), [])
-        self.assertNotEqual(store.messages(1, "xiaohong"), [])
+        contents = [message.content for message in store.messages(1)]
+        self.assertFalse(
+            any(
+                content.endswith("：a") or content.endswith("：e")
+                for content in contents
+            )
+        )
+        self.assertTrue(any(content.endswith("：c") for content in contents))
 
     def test_clear_group_does_not_affect_other_groups(self) -> None:
         store = ConversationStore(max_turns=2)
@@ -112,9 +125,9 @@ class ConversationStoreTests(unittest.TestCase):
         store.append_turn(1, 11, "xiaohong", "小红", "c", "d")
         store.append_turn(2, 10, "xiaoming", "小明", "e", "f")
 
-        self.assertEqual(store.clear_group(1), 2)
-        self.assertEqual(store.messages(1, "xiaoming"), [])
-        self.assertEqual(len(store.messages(2, "xiaoming")), 2)
+        self.assertEqual(store.clear_group(1), 1)
+        self.assertEqual(store.messages(1), [])
+        self.assertEqual(len(store.messages(2)), 2)
 
     def test_clear_group_counts_one_person_with_multiple_accounts_once(self) -> None:
         store = ConversationStore(max_turns=2)
@@ -150,8 +163,8 @@ class ResponseParsingTests(unittest.TestCase):
                     {
                         "id": "call_1",
                         "function": {
-                            "name": "get_weather",
-                            "arguments": '{"location":"北京"}',
+                            "name": "web_search",
+                            "arguments": '{"query":"北京"}',
                         },
                     }
                 ]
@@ -159,8 +172,8 @@ class ResponseParsingTests(unittest.TestCase):
         )
 
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0].name, "get_weather")
-        self.assertEqual(calls[0].arguments, {"location": "北京"})
+        self.assertEqual(calls[0].name, "web_search")
+        self.assertEqual(calls[0].arguments, {"query": "北京"})
 
 
 class ToolCallingTests(unittest.IsolatedAsyncioTestCase):
@@ -185,8 +198,8 @@ class ToolCallingTests(unittest.IsolatedAsyncioTestCase):
                                         "id": "call_1",
                                         "type": "function",
                                         "function": {
-                                            "name": "get_weather",
-                                            "arguments": '{"location":"北京"}',
+                                            "name": "web_search",
+                                            "arguments": '{"query":"北京"}',
                                         },
                                     }
                                 ],
@@ -206,13 +219,13 @@ class ToolCallingTests(unittest.IsolatedAsyncioTestCase):
         answer = await client.complete_with_tools(
             system_prompt="test",
             history=[],
-            prompt="北京天气",
+            prompt="搜索北京",
             tools=[],
             execute_tool=execute,  # type: ignore[arg-type]
         )
 
         self.assertEqual(answer, "北京今天晴。")
-        self.assertEqual(executed, [("get_weather", {"location": "北京"})])
+        self.assertEqual(executed, [("web_search", {"query": "北京"})])
 
     async def test_returns_factual_tool_result_without_second_model_pass(self) -> None:
         client = DeepSeekClient(

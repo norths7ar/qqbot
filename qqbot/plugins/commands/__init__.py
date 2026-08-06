@@ -1,26 +1,15 @@
 from __future__ import annotations
 
-from nonebot import get_driver, logger, on_command, require
+from nonebot import get_driver, get_plugin_config, logger, on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message
 from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
+from pydantic import BaseModel
 
 from qqbot.memory import MemoryEntry, Person
 from qqbot.memory_runtime import memory_store
 from qqbot.menu import build_menu
-from qqbot.news import strip_unavailable_detail_hint
-
-require("nonebot_plugin_jrrp3")
-require("nonebot_plugin_multi_source_daily")
-
-from nonebot_plugin_jrrp3.command import (  # noqa: E402
-    alljrrp_handle_func,
-    jrrp_handle_func,
-    monthjrrp_handle_func,
-    weekjrrp_handle_func,
-)
-from nonebot_plugin_multi_source_daily.api import get_news_source  # noqa: E402
 
 __plugin_meta__ = PluginMetadata(
     name="统一命令",
@@ -31,19 +20,23 @@ __plugin_meta__ = PluginMetadata(
     supported_adapters={"~onebot.v11"},
 )
 
-ALLOWED_GROUPS = {577015417, 482997153}
+
+class Config(BaseModel):
+    command_allowed_groups: frozenset[int] = frozenset({482997153})
+    history_today_enabled: bool = False
+
+
+plugin_config = get_plugin_config(Config)
 
 
 async def allowed_group(event: GroupMessageEvent) -> bool:
-    return event.group_id in ALLOWED_GROUPS
+    return event.group_id in plugin_config.command_allowed_groups
 
 
 GROUP_RULE = Rule(allowed_group)
 COMMAND_ARGUMENT = CommandArg()
 
 menu = on_command("菜单", aliases={"帮助"}, rule=GROUP_RULE, priority=4, block=True)
-fortune = on_command("运势", rule=GROUP_RULE, priority=4, block=True)
-news = on_command("新闻", rule=GROUP_RULE, priority=4, block=True)
 my_memories = on_command("我的记忆", rule=GROUP_RULE, priority=4, block=True)
 forget_me = on_command("忘记我", rule=GROUP_RULE, priority=4, block=True)
 remember = on_command("记住", rule=GROUP_RULE, priority=4, block=True)
@@ -110,61 +103,12 @@ async def _target_person(
 
 @menu.handle()
 async def handle_menu(event: GroupMessageEvent) -> None:
-    await menu.finish(build_menu(is_superuser=_is_superuser(event.user_id)))
-
-
-@fortune.handle()
-async def handle_fortune(
-    event: GroupMessageEvent,
-    args: Message = COMMAND_ARGUMENT,
-) -> None:
-    period = args.extract_plain_text().strip()
-    handlers = {
-        "": jrrp_handle_func,
-        "今日": jrrp_handle_func,
-        "今天": jrrp_handle_func,
-        "本周": weekjrrp_handle_func,
-        "周": weekjrrp_handle_func,
-        "本月": monthjrrp_handle_func,
-        "月": monthjrrp_handle_func,
-        "平均": alljrrp_handle_func,
-        "历史": alljrrp_handle_func,
-    }
-    handler = handlers.get(period)
-    if handler is None:
-        await fortune.finish("用法：/运势 [今日|本周|本月|平均]")
-    await fortune.finish(handler(event).strip())
-
-
-@news.handle()
-async def handle_news(args: Message = COMMAND_ARGUMENT) -> None:
-    requested = args.extract_plain_text().strip()
-    news_types = {
-        "": "60秒",
-        "60秒": "60秒",
-        "60s": "60秒",
-        "知乎": "知乎热榜",
-        "知乎热榜": "知乎热榜",
-        "微博": "微博热搜",
-        "微博热搜": "微博热搜",
-    }
-    news_type = news_types.get(requested)
-    if news_type is None:
-        await news.finish("用法：/新闻 [60秒|知乎|微博]")
-
-    await news.send(f"正在获取{news_type}，稍等一下。")
-    try:
-        result = await get_news_source(news_type).fetch(
-            format_type="text",
-            force_refresh=False,
+    await menu.finish(
+        build_menu(
+            is_superuser=_is_superuser(event.user_id),
+            history_today_enabled=plugin_config.history_today_enabled,
         )
-    except Exception:
-        logger.exception("Failed to fetch news type={}", news_type)
-        await news.finish("新闻源暂时不可用，稍后再试。")
-    result_text = (
-        result.extract_plain_text() if isinstance(result, Message) else str(result)
     )
-    await news.finish(strip_unavailable_detail_hint(result_text))
 
 
 @my_memories.handle()
