@@ -146,6 +146,25 @@ HTTP 或 HTTPS 图片地址。图片服务或 MiMo 暂时失败时，机器人�
 成功的 MiMo 观察文本以及失败响应中的状态、`finish_reason`、`refusal` 和错误信息
 会写入本地运行日志；API Key、图片二进制和 base64 不会写入日志。
 
+## 审计日志
+
+聊天链路另写一份结构化 JSONL 审计日志到
+`data/logs/qqbot-audit.jsonl`。同一条 @ 消息使用稳定的 `trace_id` 串联输入解析、
+路由、MiMo、DeepSeek、Tool Calling 和最终生成回复。工具事件包含工具名、参数、
+耗时、结果摘要或异常，因此可以区分“模型没有调用搜索”“搜索调用失败”和“搜索成功
+后模型如何作答”。后台记忆提取也会记录批次结果。
+
+审计日志自动遮蔽名称中含 key、token、secret、password、authorization 或 cookie
+的字段，也不会记录图片二进制和 base64。默认单文件 5 MiB、保留 3 份轮转文件；
+`qqbot.ps1 logs` 会同时显示最新运行日志和最近 80 条审计事件。
+
+相关配置：
+
+- `AUDIT_LOG_ENABLED`：是否启用审计日志，默认 `true`。
+- `AUDIT_LOG_MAX_BYTES`：单个审计日志文件的轮转阈值，默认 `5242880`。
+- `AUDIT_LOG_BACKUP_COUNT`：保留的旧日志数量，默认 `3`。
+- `AUDIT_LOG_TEXT_LIMIT`：单个文本字段最多记录字符数，默认 `4000`。
+
 如果第一个词没有精确命中注册功能，消息才作为普通聊天交给模型；模型仍可通过
 Tool Calling 自行判断是否需要联网搜索、历史事件、长期记忆、群成员、群友
 称呼或群聊记录工具，但这属于自然语言能力，不是要求群友学习的菜单入口。

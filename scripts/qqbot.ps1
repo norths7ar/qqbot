@@ -449,6 +449,12 @@ function Show-BotLogs {
         Get-Content -LiteralPath $paths.Stderr -Tail 80 -Encoding utf8
         $shown = $true
     }
+    $auditPath = Join-Path $logDirectory "qqbot-audit.jsonl"
+    if (Test-Path -LiteralPath $auditPath) {
+        Write-Output "=== audit: $auditPath ==="
+        Get-Content -LiteralPath $auditPath -Tail 80 -Encoding utf8
+        $shown = $true
+    }
     if (-not $shown) {
         Write-Output "No background logs yet."
     }
