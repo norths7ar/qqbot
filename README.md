@@ -10,7 +10,6 @@ NoneBot2 使用 FastAPI 驱动并负责上层逻辑。
 - `bot.py`：NoneBot 的显式运行入口，供 `nb run` 和后台脚本共用。
 - `.env`：本地运行配置与密钥，不提交到 Git。
 - `.env.example`：需要手工填写的配置项模板。
-- `.env.prod`：nb-cli 生成的生产环境驱动配置。
 - `qqbot/plugins/llm_chat/`：受群白名单和 @ 触发限制的 DeepSeek 聊天插件。
 - `qqbot/multimodal.py`：受大小与格式限制的图片下载和 MiMo 视觉观察。
 - `tests/`：不访问外部服务的单元测试。
@@ -59,6 +58,8 @@ Windows 启动；需要机器人时手动执行 `start` 即可。`bot.py` 进程
 
 首次启动前请填写 `.env`。`SUPERUSERS` 可填写为 QQ 号组成的 JSON 数组，
 例如 `["123456789"]`。
+项目固定只读取这一份本地 `.env`；`ENVIRONMENT=local` 仅用于让启动日志明确显示
+本地环境，不会再加载 `.env.prod` 等环境覆盖文件。
 
 如需让聊天机器人查询实时信息，还需要申请 Tavily API Key，并在 `.env` 中填写
 `TAVILY_API_KEY`。没有填写时，人物记忆、本地群聊上下文、B站解析和群聊总结

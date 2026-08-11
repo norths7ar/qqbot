@@ -43,20 +43,13 @@ function Get-ConfiguredPort {
     }
 
     $configuredPort = 8080
-    $environmentPaths = @(
-        (Join-Path $projectRoot ".env"),
-        (Join-Path $projectRoot ".env.prod")
-    )
-    foreach ($environmentPath in $environmentPaths) {
-        if (-not (Test-Path -LiteralPath $environmentPath)) {
-            continue
-        }
+    $environmentPath = Join-Path $projectRoot ".env"
+    if (Test-Path -LiteralPath $environmentPath) {
         $portLine = Get-Content -LiteralPath $environmentPath -Encoding utf8 |
             Where-Object { $_ -match "^\s*PORT\s*=\s*([0-9]+)\s*$" } |
             Select-Object -First 1
         if ($portLine -and $portLine -match "^\s*PORT\s*=\s*([0-9]+)\s*$") {
             $configuredPort = [int]$Matches[1]
-            break
         }
     }
     return $configuredPort
