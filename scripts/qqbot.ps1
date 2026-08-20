@@ -292,6 +292,23 @@ function Start-Bot {
         throw "qqbot runtime lock is held, but its process state is invalid. Refusing to start a duplicate process."
     }
     Remove-StaleState
+    $startPort = Get-ConfiguredPort
+    $portOccupiers = Get-ListeningProcessIds -Port $startPort
+    if ($portOccupiers.Count -gt 0) {
+        $occupierDetails = foreach ($occupierPid in $portOccupiers) {
+            $occupierProcess = Get-Process -Id $occupierPid -ErrorAction SilentlyContinue
+            if ($null -ne $occupierProcess) {
+                "PID $occupierPid ($($occupierProcess.ProcessName))"
+            }
+            else {
+                "PID $occupierPid"
+            }
+        }
+        throw (
+            "Port $startPort is already in use by $($occupierDetails -join ', '). " +
+            'Refusing to start qqbot on an occupied port. Stop the other process or change PORT.'
+        )
+    }
 
     if (-not (Test-Path -LiteralPath $PythonPath)) {
         throw "Cannot find the qqbot Python interpreter: $PythonPath"
