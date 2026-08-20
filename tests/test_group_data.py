@@ -39,3 +39,12 @@ class GroupDataStoreTests(unittest.TestCase):
         )
         self.assertEqual(store.clear_messages(1), 2)
         self.assertEqual(store.recent_messages(1, limit=10), [])
+
+    def test_messages_by_ids_returns_exact_records(self) -> None:
+        first = self.store.record_message(1, 10, "甲", "第一条")
+        second = self.store.record_message(1, 11, "乙", "第二条")
+
+        messages = self.store.messages_by_ids([second or 0, 999999, first or 0])
+
+        self.assertEqual(set(messages), {first, second})
+        self.assertEqual(messages[first or 0].content, "第一条")

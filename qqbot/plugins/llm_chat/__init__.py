@@ -32,6 +32,8 @@ from qqbot.identity import (  # noqa: E402
 from qqbot.llm import ConversationStore, Cooldown, DeepSeekClient  # noqa: E402
 from qqbot.memory_extraction import MemoryExtractor  # noqa: E402
 from qqbot.memory_runtime import memory_store  # noqa: E402
+from qqbot.memory_shadow import ShadowMemoryExtractor  # noqa: E402
+from qqbot.memory_v2_runtime import claim_store  # noqa: E402
 from qqbot.menu import build_menu  # noqa: E402
 from qqbot.message_input import (  # noqa: E402
     image_urls_from_message,
@@ -86,6 +88,9 @@ class Config(BaseModel):
     memory_auto_extract_enabled: bool = True
     memory_extract_batch_size: int = Field(default=20, ge=5, le=100)
     memory_episode_ttl_hours: float = Field(default=72, ge=1, le=720)
+    memory_v2_shadow_enabled: bool = False
+    memory_v2_shadow_batch_size: int = Field(default=20, ge=5, le=100)
+    memory_v2_shadow_backfill_existing: bool = False
     audit_log_enabled: bool = True
     audit_log_max_bytes: int = Field(
         default=5 * 1024 * 1024,
@@ -183,6 +188,12 @@ audit_log.record(
     web_search_available=tavily.available,
     vision_enabled=(plugin_config.mimo_multimodal_enabled and vision_client.available),
     vision_model=plugin_config.mimo_multimodal_model,
+    memory_v2_schema_version=claim_store.schema_version(),
+    memory_v2_shadow_enabled=plugin_config.memory_v2_shadow_enabled,
+    memory_v2_shadow_batch_size=plugin_config.memory_v2_shadow_batch_size,
+    memory_v2_shadow_backfill_existing=(
+        plugin_config.memory_v2_shadow_backfill_existing
+    ),
 )
 memory_extractor = MemoryExtractor(
     client,
@@ -191,6 +202,20 @@ memory_extractor = MemoryExtractor(
     batch_size=plugin_config.memory_extract_batch_size,
     episode_ttl_hours=plugin_config.memory_episode_ttl_hours,
 )
+shadow_memory_extractor = ShadowMemoryExtractor(
+    client,
+    claim_store,
+    group_data_store,
+    batch_size=plugin_config.memory_v2_shadow_batch_size,
+    backfill_existing=plugin_config.memory_v2_shadow_backfill_existing,
+    episode_ttl_hours=plugin_config.memory_episode_ttl_hours,
+)
+if plugin_config.memory_v2_shadow_enabled:
+    for shadow_group_id in plugin_config.llm_allowed_groups:
+        claim_store.initialize_shadow_cursor(
+            shadow_group_id,
+            group_data_store.latest_human_message_id(shadow_group_id),
+        )
 memory_extraction_tasks: dict[int, asyncio.Task[None]] = {}
 
 CHAT_TOOLS: list[dict[str, object]] = [
@@ -377,7 +402,10 @@ async def handle_observe_group(bot: Bot, event: GroupMessageEvent) -> None:
 
 
 def _schedule_memory_extraction(group_id: int) -> None:
-    if not plugin_config.memory_auto_extract_enabled:
+    if not (
+        plugin_config.memory_auto_extract_enabled
+        or plugin_config.memory_v2_shadow_enabled
+    ):
         return
     existing = memory_extraction_tasks.get(group_id)
     if existing is not None and not existing.done():
@@ -386,34 +414,70 @@ def _schedule_memory_extraction(group_id: int) -> None:
     async def run() -> None:
         started = time.perf_counter()
         total_processed = 0
-        audit_log.record(
-            "memory_extraction.started",
-            group_id=group_id,
-            batch_size=plugin_config.memory_extract_batch_size,
-        )
-        try:
-            for _ in range(3):
-                processed = await memory_extractor.process_available(group_id)
-                total_processed += processed
-                if processed < plugin_config.memory_extract_batch_size:
-                    break
-        except Exception as error:
-            logger.exception("Background memory extraction failed group={}", group_id)
+        if plugin_config.memory_auto_extract_enabled:
             audit_log.record(
-                "memory_extraction.failed",
+                "memory_extraction.started",
                 group_id=group_id,
-                duration_ms=round((time.perf_counter() - started) * 1000, 1),
-                processed_messages=total_processed,
-                error_type=type(error).__name__,
-                error=str(error),
+                batch_size=plugin_config.memory_extract_batch_size,
             )
-        else:
-            audit_log.record(
-                "memory_extraction.completed",
-                group_id=group_id,
-                duration_ms=round((time.perf_counter() - started) * 1000, 1),
-                processed_messages=total_processed,
-            )
+            try:
+                for _ in range(3):
+                    processed = await memory_extractor.process_available(group_id)
+                    total_processed += processed
+                    if processed < plugin_config.memory_extract_batch_size:
+                        break
+            except Exception as error:
+                logger.exception(
+                    "Background memory extraction failed group={}", group_id
+                )
+                audit_log.record(
+                    "memory_extraction.failed",
+                    group_id=group_id,
+                    duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                    processed_messages=total_processed,
+                    error_type=type(error).__name__,
+                    error=str(error),
+                )
+            else:
+                audit_log.record(
+                    "memory_extraction.completed",
+                    group_id=group_id,
+                    duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                    processed_messages=total_processed,
+                )
+
+        if plugin_config.memory_v2_shadow_enabled:
+            shadow_started = time.perf_counter()
+            try:
+                for _ in range(3):
+                    shadow_result = await shadow_memory_extractor.process_available(
+                        group_id
+                    )
+                    audit_log.record(
+                        "memory_v2.shadow_batch",
+                        group_id=group_id,
+                        batch_id=shadow_result.batch_id,
+                        processed_messages=shadow_result.processed_messages,
+                        operation_count=shadow_result.operation_count,
+                        applied_count=shadow_result.applied_count,
+                        rejection_reasons=shadow_result.rejection_reasons,
+                    )
+                    if (
+                        shadow_result.processed_messages
+                        < plugin_config.memory_v2_shadow_batch_size
+                    ):
+                        break
+            except Exception as error:
+                logger.exception(
+                    "V2 shadow memory extraction failed group={}", group_id
+                )
+                audit_log.record(
+                    "memory_v2.shadow_failed",
+                    group_id=group_id,
+                    duration_ms=round((time.perf_counter() - shadow_started) * 1000, 1),
+                    error_type=type(error).__name__,
+                    error=str(error),
+                )
 
     task = asyncio.create_task(run())
     memory_extraction_tasks[group_id] = task

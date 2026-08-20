@@ -223,7 +223,31 @@ people:
 - `MEMORY_AUTO_EXTRACT_ENABLED`：是否启用后台自动提取，默认 `true`。
 - `MEMORY_EXTRACT_BATCH_SIZE`：每批处理的人类消息数，默认 `20`。
 - `MEMORY_EPISODE_TTL_HOURS`：普通群聊事件的有效期，默认 `72` 小时。
+- `MEMORY_V2_SHADOW_ENABLED`：是否启用 V2 影子提取，默认 `false`。影子结果
+  只写入独立 claim 表，不参与 BOT 回答。
+- `MEMORY_V2_SHADOW_BATCH_SIZE`：V2 每次影子整理的人类消息数，默认 `20`。
+- `MEMORY_V2_SHADOW_BACKFILL_EXISTING`：首次启用影子提取时是否回放已有群聊，
+  默认 `false`，即从启用后的新消息开始，避免突然处理数千条旧记录。
 - `HISTORY_TODAY_ENABLED`：是否开放“历史上的今天”，目前默认 `false`；设为
   `true` 后才会出现在菜单和 LLM 工具中。
+
+V2 本地审阅工具只面向机器人维护者，不暴露为群命令：
+
+```powershell
+uv run python -m qqbot.memory_admin status
+uv run python -m qqbot.memory_admin recent --limit 20
+uv run python -m qqbot.memory_admin candidates
+uv run python -m qqbot.memory_admin show 记忆编号
+uv run python -m qqbot.memory_admin confirm 记忆编号
+uv run python -m qqbot.memory_admin reject 记忆编号
+uv run python -m qqbot.memory_admin dispute 记忆编号
+uv run python -m qqbot.memory_admin conflicts
+uv run python -m qqbot.memory_admin batches
+```
+
+`show` 会同时显示证据消息原文；`batches` 会显示每批操作数量、实际写入数量，以及
+未通过验证的具体原因。影子 claim 不参与当前 `recall_memory`，因此审阅操作不会改变
+BOT 的正式回答。V2 表与 V1 表位于同一个本地数据库，但迁移只新增表；V1 后续写入
+会镜像到兼容 claim，关闭影子开关即可停止额外模型调用。
 
 天气、运势、新闻和提醒已经移除。历史上的今天暂时保留代码，但默认禁用。
