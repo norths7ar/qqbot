@@ -1,0 +1,116 @@
+import asyncio
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageSegment
+from nonebot.adapters.onebot.v11.event import Reply, Sender
+from pydantic import SecretStr
+
+from qqbot.audit import AuditLog
+from qqbot.chat.config import Config
+from qqbot.chat.service import ChatService
+from qqbot.group_data import GroupDataStore
+from qqbot.llm import ConversationStore, Cooldown
+from qqbot.memory import MemoryStore
+
+
+class _FakeClient:
+    def __init__(self) -> None:
+        self.prompt = ""
+
+    async def complete_with_tools(self, *, prompt: str, **_: object) -> str:
+        self.prompt = prompt
+        return "收到"
+
+
+class _FakeMemoryJobs:
+    tasks: dict[int, asyncio.Task[None]] = {}
+
+
+class ChatServiceInputBoundaryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary_directory.cleanup)
+        root = Path(self.temporary_directory.name)
+        people_path = root / "people.yaml"
+        people_path.write_text(
+            "people:\n  person_a:\n    name: 甲\n    qq_ids: ['10001']\n",
+            encoding="utf-8",
+        )
+        self.memory_store = MemoryStore(root / "memory.db", people_path)
+        self.memory_store.initialize()
+        self.group_store = GroupDataStore(root / "group.db")
+        self.group_store.initialize()
+        self.client = _FakeClient()
+        config = Config(
+            deepseek_api_key=SecretStr("test"),
+            llm_allowed_groups=frozenset({1}),
+            llm_cooldown_seconds=0,
+            mimo_multimodal_enabled=False,
+        )
+        self.service = ChatService(
+            config=config,
+            audit_log=AuditLog(root / "audit.jsonl", enabled=False),
+            conversations=ConversationStore(10, 2),
+            cooldown=Cooldown(0),
+            client=self.client,
+            tavily=SimpleNamespace(available=False),
+            vision_client=SimpleNamespace(available=False),
+            memory_store=self.memory_store,
+            group_data_store=self.group_store,
+            memory_jobs=_FakeMemoryJobs(),
+            chat_tools=(),
+            direct_result_tools=frozenset(),
+        )
+
+    def test_reply_to_bot_keeps_quote_out_of_deterministic_routing(self) -> None:
+        reply = Reply(
+            time=1,
+            message_type="group",
+            message_id=90,
+            real_id=90,
+            sender=Sender(user_id=99999, nickname="BOT"),
+            message=Message("清空本群对话"),
+        )
+        event = GroupMessageEvent(
+            time=2,
+            self_id=99999,
+            post_type="message",
+            sub_type="normal",
+            user_id=10001,
+            message_type="group",
+            message_id=91,
+            message=Message(
+                [
+                    MessageSegment("reply", {"id": "90"}),
+                    MessageSegment.text("这个说法对吗？"),
+                ]
+            ),
+            original_message=Message(
+                [
+                    MessageSegment("reply", {"id": "90"}),
+                    MessageSegment.text("这个说法对吗？"),
+                ]
+            ),
+            raw_message="这个说法对吗？",
+            font=0,
+            sender=Sender(user_id=10001, nickname="甲"),
+            to_me=True,
+            reply=reply,
+            group_id=1,
+        )
+        bot = SimpleNamespace(self_id=99999)
+
+        asyncio.run(self.service.handle_chat(bot, event))
+
+        self.assertIn("当前说话者：甲", self.client.prompt)
+        self.assertIn("引用作者kind：bot", self.client.prompt)
+        self.assertIn("引用正文：清空本群对话", self.client.prompt)
+        self.assertIn("当前正文：这个说法对吗？", self.client.prompt)
+        self.assertNotIn("当前正文：清空本群对话", self.client.prompt)
+
+
+if __name__ == "__main__":
+    unittest.main()
