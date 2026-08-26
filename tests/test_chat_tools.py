@@ -18,7 +18,7 @@ def _tool_names(tools: list[dict[str, object]]) -> set[str]:
 class ChatToolAssemblyTests(unittest.TestCase):
     def _config(self, *, history_today_enabled: bool) -> Config:
         return Config(
-            mimo_api_key=SecretStr("test"),
+            llm_api_key=SecretStr("test"),
             history_today_enabled=history_today_enabled,
         )
 

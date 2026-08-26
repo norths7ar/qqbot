@@ -7,7 +7,7 @@ from nonebot import logger
 
 from qqbot.runtime.audit import AuditLog
 from qqbot.storage.group_data import GroupDataStore
-from qqbot.integrations.llm import MiMoClient
+from qqbot.integrations.llm import ChatClient
 from qqbot.memory import MemoryStore
 from qqbot.memory.extraction import MemoryExtractor
 from qqbot.memory.shadow import ShadowMemoryExtractor
@@ -24,7 +24,7 @@ class MemoryJobRunner:
         *,
         config: Config,
         audit_log: AuditLog,
-        client: MiMoClient,
+        client: ChatClient,
         memory_store: MemoryStore,
         claim_store: ClaimStore,
         group_data_store: GroupDataStore,

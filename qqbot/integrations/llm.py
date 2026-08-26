@@ -261,7 +261,7 @@ class Cooldown:
         )
 
 
-class MiMoClient:
+class ChatClient:
     def __init__(
         self,
         *,

@@ -51,7 +51,7 @@ class ChatServiceInputBoundaryTests(unittest.TestCase):
         self.group_store.initialize()
         self.client = _FakeClient()
         config = Config(
-            mimo_api_key=SecretStr("test"),
+            llm_api_key=SecretStr("test"),
             llm_allowed_groups=frozenset({1}),
             llm_cooldown_seconds=0,
         )

@@ -11,7 +11,7 @@ from qqbot.chat.config import Config
 from qqbot.chat.memory_jobs import MemoryJobRunner
 from qqbot.chat.service import ChatService
 from qqbot.chat.tools import build_chat_tools
-from qqbot.integrations.llm import ConversationStore, Cooldown, MiMoClient
+from qqbot.integrations.llm import ChatClient, ConversationStore, Cooldown
 from qqbot.integrations.vision import ImageContentLoader
 from qqbot.integrations.web import TavilyClient
 from qqbot.memory.runtime import memory_store
@@ -48,24 +48,24 @@ conversations = ConversationStore(
     ),
 )
 cooldown = Cooldown(plugin_config.llm_cooldown_seconds)
-client = MiMoClient(
-    api_key=plugin_config.mimo_api_key.get_secret_value(),
-    base_url=plugin_config.mimo_base_url,
-    model=plugin_config.mimo_model,
+client = ChatClient(
+    api_key=plugin_config.llm_api_key.get_secret_value(),
+    base_url=plugin_config.llm_base_url,
+    model=plugin_config.llm_model,
     timeout_seconds=plugin_config.llm_timeout_seconds,
     max_output_tokens=plugin_config.llm_max_output_tokens,
     max_concurrency=plugin_config.llm_max_concurrency,
 )
 tavily = TavilyClient(plugin_config.tavily_api_key.get_secret_value())
 image_loader = ImageContentLoader(
-    timeout_seconds=plugin_config.mimo_timeout_seconds,
-    max_images=plugin_config.mimo_max_images,
-    max_image_bytes=plugin_config.mimo_max_image_bytes,
+    timeout_seconds=plugin_config.media_download_timeout_seconds,
+    max_images=plugin_config.media_max_images,
+    max_image_bytes=plugin_config.media_max_image_bytes,
 )
 audit_log.record(
     "runtime.ready",
     component="llm_chat",
-    mimo_model=plugin_config.mimo_model,
+    llm_model=plugin_config.llm_model,
     web_search_available=tavily.available,
     memory_v2_schema_version=claim_store.schema_version(),
     memory_v2_shadow_enabled=plugin_config.memory_v2_shadow_enabled,

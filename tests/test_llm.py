@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 from qqbot.integrations.llm import (
     ConversationStore,
     Cooldown,
-    MiMoClient,
+    ChatClient,
     extract_response_text,
     extract_tool_calls,
 )
@@ -178,7 +178,7 @@ class ResponseParsingTests(unittest.TestCase):
 
 class ToolCallingTests(unittest.IsolatedAsyncioTestCase):
     async def test_executes_tool_and_returns_final_answer(self) -> None:
-        client = MiMoClient(
+        client = ChatClient(
             api_key="test",
             base_url="https://example.com",
             model="test-model",
@@ -228,7 +228,7 @@ class ToolCallingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(executed, [("web_search", {"query": "北京"})])
 
     async def test_returns_factual_tool_result_without_second_model_pass(self) -> None:
-        client = MiMoClient(
+        client = ChatClient(
             api_key="test",
             base_url="https://example.com",
             model="test-model",

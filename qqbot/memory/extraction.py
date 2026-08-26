@@ -5,14 +5,14 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 
 from qqbot.storage.group_data import GroupDataStore, GroupMessageRecord
-from qqbot.integrations.llm import MiMoClient
+from qqbot.integrations.llm import ChatClient
 from qqbot.memory.store import MemoryStore
 
 
 class MemoryExtractor:
     def __init__(
         self,
-        client: MiMoClient,
+        client: ChatClient,
         memory_store: MemoryStore,
         group_store: GroupDataStore,
         *,

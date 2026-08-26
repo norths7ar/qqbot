@@ -16,7 +16,7 @@ from qqbot.chat.tools import (
     build_tool_executor,
     recent_group_transcript,
 )
-from qqbot.integrations.llm import ConversationStore, Cooldown, MiMoClient, UserContent
+from qqbot.integrations.llm import ChatClient, ConversationStore, Cooldown, UserContent
 from qqbot.integrations.vision import ImageContentLoader
 from qqbot.integrations.web import LOCAL_TIMEZONE, TavilyClient, history_today
 from qqbot.memory import MemoryStore
@@ -48,7 +48,7 @@ class ChatService:
         audit_log: AuditLog,
         conversations: ConversationStore,
         cooldown: Cooldown,
-        client: MiMoClient,
+        client: ChatClient,
         tavily: TavilyClient,
         image_loader: ImageContentLoader,
         memory_store: MemoryStore,
@@ -175,7 +175,7 @@ class ChatService:
                     "Failed to inspect replied message id={}",
                     resolved_message_id,
                 )
-        return tuple(dict.fromkeys(urls))[: self.config.mimo_max_images]
+        return tuple(dict.fromkeys(urls))[: self.config.media_max_images]
 
     async def _load_replied_message(
         self,
@@ -312,6 +312,29 @@ class ChatService:
                 response_to_user_id=event.user_id,
             )
             return MessageSegment.reply(event.message_id) + answer
+
+    def _record_reply(
+        self,
+        bot: Bot,
+        event: GroupMessageEvent,
+        trace_id: str,
+        answer: str,
+    ) -> ChatReply:
+        self.conversations.append_message(
+            event.group_id,
+            int(bot.self_id),
+            "bot",
+            "BOT",
+            answer,
+            role="assistant",
+            response_to_user_id=event.user_id,
+        )
+        self.audit_log.record(
+            "chat.reply_ready",
+            trace_id=trace_id,
+            answer=answer,
+        )
+        return MessageSegment.reply(event.message_id) + answer
 
     async def handle_chat(self, bot: Bot, event: GroupMessageEvent) -> ChatReply:
         person = self.memory_store.ensure_person_for_account(
@@ -507,7 +530,7 @@ class ChatService:
             self.audit_log.record(
                 "llm.started",
                 trace_id=trace_id,
-                model=self.config.mimo_model,
+                model=self.config.llm_model,
                 history_messages=len(history),
                 prompt=model_prompt,
                 available_tools=[
@@ -534,7 +557,7 @@ class ChatService:
                 self.audit_log.record(
                     "llm.failed",
                     trace_id=trace_id,
-                    model=self.config.mimo_model,
+                    model=self.config.llm_model,
                     duration_ms=round((time.perf_counter() - llm_started) * 1000, 1),
                     error_type="TimeoutException",
                 )
@@ -549,7 +572,7 @@ class ChatService:
                 self.audit_log.record(
                     "llm.failed",
                     trace_id=trace_id,
-                    model=self.config.mimo_model,
+                    model=self.config.llm_model,
                     duration_ms=round((time.perf_counter() - llm_started) * 1000, 1),
                     error_type=type(error).__name__,
                     http_status=error.response.status_code,
@@ -565,7 +588,7 @@ class ChatService:
                 self.audit_log.record(
                     "llm.failed",
                     trace_id=trace_id,
-                    model=self.config.mimo_model,
+                    model=self.config.llm_model,
                     duration_ms=round((time.perf_counter() - llm_started) * 1000, 1),
                     error_type=type(error).__name__,
                     error=str(error),
@@ -575,22 +598,8 @@ class ChatService:
             self.audit_log.record(
                 "llm.completed",
                 trace_id=trace_id,
-                model=self.config.mimo_model,
+                model=self.config.llm_model,
                 duration_ms=round((time.perf_counter() - llm_started) * 1000, 1),
                 answer=answer,
             )
-            self.conversations.append_message(
-                event.group_id,
-                int(bot.self_id),
-                "bot",
-                "BOT",
-                answer,
-                role="assistant",
-                response_to_user_id=event.user_id,
-            )
-            self.audit_log.record(
-                "chat.reply_ready",
-                trace_id=trace_id,
-                answer=answer,
-            )
-            return MessageSegment.reply(event.message_id) + answer
+            return self._record_reply(bot, event, trace_id, answer)
