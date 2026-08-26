@@ -181,6 +181,29 @@ class ChatService:
                 )
         return tuple(dict.fromkeys(urls))[: self.config.mimo_max_images]
 
+    async def _load_replied_message(
+        self,
+        bot: Bot,
+        reply_message_id: int | None,
+    ) -> tuple[Message | None, int | str | None, str]:
+        """Load quote data without inventing an author when OneBot cannot resolve it."""
+        if reply_message_id is None:
+            return None, None, ""
+        try:
+            reply_data = await bot.get_msg(message_id=reply_message_id)
+        except Exception:
+            logger.exception("Failed to resolve replied message id={}", reply_message_id)
+            return None, None, ""
+        if not isinstance(reply_data, Mapping):
+            return None, None, ""
+        reply_message = message_from_onebot_api(reply_data.get("message"))
+        sender = reply_data.get("sender")
+        if not isinstance(sender, Mapping):
+            return reply_message, None, ""
+        sender_id = sender.get("user_id")
+        sender_name = str(sender.get("card") or sender.get("nickname") or "").strip()
+        return reply_message, sender_id, sender_name
+
     @staticmethod
     def _image_question(prompt: str) -> str:
         question = prompt.replace("[图片]", "").replace("[回复消息]", "").strip()
@@ -288,6 +311,18 @@ class ChatService:
             author_user_id=event.user_id,
             author_name=person.display_name,
             bot_user_id=bot.self_id,
+            reply_message=event.reply.message if event.reply is not None else None,
+            reply_id_override=(
+                event.reply.message_id if event.reply is not None else None
+            ),
+            reply_sender_user_id=(
+                event.reply.sender.user_id if event.reply is not None else None
+            ),
+            reply_sender_name=(
+                event.reply.sender.card or event.reply.sender.nickname or ""
+                if event.reply is not None
+                else ""
+            ),
         )
         prompt = resolved_message.prompt_text
         key = (event.group_id, event.user_id)
@@ -339,6 +374,32 @@ class ChatService:
             if event.reply is not None
             else resolved_message.reply_message_id
         )
+        reply_sender_user_id = (
+            event.reply.sender.user_id if event.reply is not None else None
+        )
+        reply_sender_name = (
+            event.reply.sender.card or event.reply.sender.nickname or ""
+            if event.reply is not None
+            else ""
+        )
+        if replied_message is None and reply_message_id is not None:
+            replied_message, api_sender_id, api_sender_name = (
+                await self._load_replied_message(bot, reply_message_id)
+            )
+            reply_sender_user_id = api_sender_id
+            reply_sender_name = api_sender_name
+            resolved_message = resolve_onebot_message(
+                event.original_message,
+                self.memory_store,
+                author_user_id=event.user_id,
+                author_name=person.display_name,
+                bot_user_id=bot.self_id,
+                reply_message=replied_message,
+                reply_id_override=reply_message_id,
+                reply_sender_user_id=reply_sender_user_id,
+                reply_sender_name=reply_sender_name,
+            )
+            prompt = resolved_message.current_body
         image_urls = await self._message_image_urls(
             bot,
             reply_message_id,
@@ -461,7 +522,9 @@ class ChatService:
                 return f"说慢一点，请等待 {retry_after:.1f} 秒再问。"
 
             self.cooldown.mark_request(*key)
-            model_prompt = prompt or "请描述并回应这些图片。"
+            model_prompt = resolved_message.llm_prompt()
+            if not prompt and image_urls:
+                model_prompt = f"{model_prompt}\n请描述并回应这些图片。"
             if image_urls:
                 if not self.config.mimo_multimodal_enabled or not self.vision_client.available:
                     self.audit_log.record(
