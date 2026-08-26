@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from qqbot.group_data import GroupDataStore, GroupMessageRecord
 from qqbot.llm import DeepSeekClient
-from qqbot.memory import MemoryStore
+from qqbot.memory.store import MemoryStore
 
 
 class MemoryExtractor:

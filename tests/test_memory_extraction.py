@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 from qqbot.group_data import GroupDataStore
 from qqbot.memory import MemoryStore
-from qqbot.memory_extraction import MemoryExtractor, parse_extraction_payload
+from qqbot.memory.extraction import MemoryExtractor, parse_extraction_payload
 
 
 class MemoryExtractionTests(unittest.IsolatedAsyncioTestCase):

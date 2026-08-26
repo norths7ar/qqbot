@@ -8,7 +8,7 @@ from nonebot.rule import Rule
 from pydantic import BaseModel
 
 from qqbot.memory import MemoryEntry, Person
-from qqbot.memory_runtime import memory_store
+from qqbot.memory.runtime import memory_store
 from qqbot.menu import build_menu
 
 __plugin_meta__ = PluginMetadata(
