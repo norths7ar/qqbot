@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from qqbot.llm import extract_response_text
+from qqbot.integrations.llm import extract_response_text
 
 
 @dataclass(frozen=True, slots=True)

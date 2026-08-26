@@ -15,9 +15,9 @@ from qqbot.identity import (
     lookup_group_member,
     match_group_member_person_ids,
 )
-from qqbot.llm import ToolExecutor
+from qqbot.integrations.llm import ToolExecutor
 from qqbot.memory import MemoryStore
-from qqbot.web_tools import TavilyClient, history_today
+from qqbot.integrations.web import TavilyClient, history_today
 
 if TYPE_CHECKING:
     from qqbot.chat.config import Config

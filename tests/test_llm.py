@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock
 
-from qqbot.llm import (
+from qqbot.integrations.llm import (
     ConversationStore,
     Cooldown,
     DeepSeekClient,

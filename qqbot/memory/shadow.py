@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from qqbot.group_data import GroupDataStore, GroupMessageRecord
-from qqbot.llm import DeepSeekClient
+from qqbot.integrations.llm import DeepSeekClient
 from qqbot.memory.v2 import CLAIM_OPERATIONS, ClaimStore, MemoryClaim, parse_operations
 
 

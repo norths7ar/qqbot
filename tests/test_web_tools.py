@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock
 
-from qqbot.web_tools import TavilyClient, find_bilibili_reference
+from qqbot.integrations.web import TavilyClient, find_bilibili_reference
 
 
 class BilibiliReferenceTests(unittest.TestCase):

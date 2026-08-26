@@ -3,7 +3,11 @@ import unittest
 
 import httpx
 
-from qqbot.multimodal import MiMoResponseError, MiMoVisionClient, detect_image_mime
+from qqbot.integrations.vision import (
+    MiMoResponseError,
+    MiMoVisionClient,
+    detect_image_mime,
+)
 
 
 class ImageTypeTests(unittest.TestCase):

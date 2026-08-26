@@ -7,7 +7,7 @@ from nonebot import logger
 
 from qqbot.audit import AuditLog
 from qqbot.group_data import GroupDataStore
-from qqbot.llm import DeepSeekClient
+from qqbot.integrations.llm import DeepSeekClient
 from qqbot.memory import MemoryStore
 from qqbot.memory.extraction import MemoryExtractor
 from qqbot.memory.shadow import ShadowMemoryExtractor
