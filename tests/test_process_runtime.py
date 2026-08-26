@@ -27,8 +27,9 @@ class BotProcessGuardTests(unittest.TestCase):
         self.assertEqual(state["git_commit"], "unknown")
         self.assertEqual(state["memory_schema_version"], "unknown")
 
-        guard.mark_ready(memory_schema_version=2)
+        returned_state = guard.mark_ready(memory_schema_version=2)
         ready_state = json.loads(guard.state_path.read_text(encoding="utf-8"))
+        self.assertEqual(returned_state, ready_state)
         self.assertTrue(ready_state["ready"])
         self.assertEqual(ready_state["status"], "ready")
         self.assertEqual(ready_state["memory_schema_version"], "2")

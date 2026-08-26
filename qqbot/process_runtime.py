@@ -64,7 +64,7 @@ class BotProcessGuard:
         self._remove_owned_state()
         self._unlock()
 
-    def mark_ready(self, *, memory_schema_version: int | str) -> None:
+    def mark_ready(self, *, memory_schema_version: int | str) -> dict[str, object]:
         """Publish readiness only after NoneBot and the memory stores initialize."""
         if self._lock_file is None:
             raise RuntimeError("bot process guard must be acquired before ready")
@@ -76,6 +76,7 @@ class BotProcessGuard:
         state["ready_at"] = datetime.now(UTC).isoformat()
         state["memory_schema_version"] = str(memory_schema_version)
         self._write_state_payload(state)
+        return state
 
     def __enter__(self) -> BotProcessGuard:
         self.acquire()

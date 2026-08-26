@@ -139,7 +139,7 @@ function Get-WorkspaceGitCommit {
     if ($null -eq $gitCommand) {
         return "unknown"
     }
-    $commit = & $gitCommand.Source @("rev-parse", "HEAD") 2>$null
+    $commit = & $gitCommand.Source @("-C", $projectRoot, "rev-parse", "HEAD") 2>$null
     if ($LASTEXITCODE -ne 0) {
         return "unknown"
     }
