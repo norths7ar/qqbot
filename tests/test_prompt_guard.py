@@ -1,6 +1,6 @@
 import unittest
 
-from qqbot.prompt_guard import blocked_reply, inspect_prompt
+from qqbot.messaging.prompt_guard import blocked_reply, inspect_prompt
 
 
 class PromptGuardTests(unittest.TestCase):

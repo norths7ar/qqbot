@@ -5,12 +5,12 @@ from pathlib import Path
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 from qqbot.memory import MemoryStore
-from qqbot.message_input import (
+from qqbot.messaging.input import (
     image_urls_from_message,
     message_from_onebot_api,
     resolve_onebot_message,
 )
-from qqbot.tool_routing import parse_function_call
+from qqbot.messaging.tool_routing import parse_function_call
 
 
 class OneBotMessageResolutionTests(unittest.TestCase):

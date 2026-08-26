@@ -10,7 +10,7 @@ from typing import Literal
 
 import httpx
 
-from qqbot.plain_text import to_qq_plain_text
+from qqbot.messaging.plain_text import to_qq_plain_text
 
 type Role = Literal["system", "user", "assistant"]
 

@@ -1,6 +1,6 @@
 import unittest
 
-from qqbot.plain_text import to_qq_plain_text
+from qqbot.messaging.plain_text import to_qq_plain_text
 
 
 class PlainTextFormattingTests(unittest.TestCase):

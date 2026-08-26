@@ -1,6 +1,10 @@
 import unittest
 
-from qqbot.tool_routing import FunctionCall, is_explicit_command, parse_function_call
+from qqbot.messaging.tool_routing import (
+    FunctionCall,
+    is_explicit_command,
+    parse_function_call,
+)
 
 
 class ToolRoutingTests(unittest.TestCase):

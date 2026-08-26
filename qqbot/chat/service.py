@@ -23,14 +23,18 @@ from qqbot.group_data import GroupDataStore
 from qqbot.llm import ConversationStore, Cooldown, DeepSeekClient
 from qqbot.memory import MemoryStore
 from qqbot.menu import build_menu
-from qqbot.message_input import (
+from qqbot.messaging.input import (
     image_urls_from_message,
     message_from_onebot_api,
     resolve_onebot_message,
 )
 from qqbot.multimodal import MiMoVisionClient
-from qqbot.prompt_guard import blocked_reply, inspect_prompt
-from qqbot.tool_routing import FunctionCall, is_explicit_command, parse_function_call
+from qqbot.messaging.prompt_guard import blocked_reply, inspect_prompt
+from qqbot.messaging.tool_routing import (
+    FunctionCall,
+    is_explicit_command,
+    parse_function_call,
+)
 from qqbot.web_tools import LOCAL_TIMEZONE, TavilyClient, history_today
 
 type ChatReply = str | Message
