@@ -11,7 +11,7 @@ from pydantic import SecretStr
 from qqbot.runtime.audit import AuditLog
 from qqbot.chat.config import Config
 from qqbot.chat.service import ChatService
-from qqbot.group_data import GroupDataStore
+from qqbot.storage.group_data import GroupDataStore
 from qqbot.integrations.llm import ConversationStore, Cooldown
 from qqbot.memory import MemoryStore
 

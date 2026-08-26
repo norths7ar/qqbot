@@ -8,7 +8,7 @@ from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
 from pydantic import BaseModel, SecretStr
 
-from qqbot.group_data_runtime import group_data_store  # noqa: E402
+from qqbot.storage.runtime import group_data_store  # noqa: E402
 from qqbot.integrations.web import (  # noqa: E402
     TavilyClient,
     fetch_bilibili_video,

@@ -19,7 +19,7 @@ from qqbot.chat.tools import (
     build_tool_executor,
     recent_group_transcript,
 )
-from qqbot.group_data import GroupDataStore
+from qqbot.storage.group_data import GroupDataStore
 from qqbot.integrations.llm import ConversationStore, Cooldown, DeepSeekClient
 from qqbot.integrations.vision import MiMoVisionClient
 from qqbot.integrations.web import LOCAL_TIMEZONE, TavilyClient, history_today

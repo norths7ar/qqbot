@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from qqbot.sqlite_schema import ensure_column
+from qqbot.storage.sqlite import ensure_column
 
 
 class EnsureColumnTests(unittest.TestCase):

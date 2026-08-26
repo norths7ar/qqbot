@@ -14,7 +14,7 @@ from qqbot.chat.config import Config
 from qqbot.chat.memory_jobs import MemoryJobRunner
 from qqbot.chat.service import ChatService
 from qqbot.chat.tools import build_chat_tools
-from qqbot.group_data_runtime import group_data_store
+from qqbot.storage.runtime import group_data_store
 from qqbot.integrations.llm import ConversationStore, Cooldown, DeepSeekClient
 from qqbot.integrations.vision import MiMoVisionClient
 from qqbot.integrations.web import TavilyClient

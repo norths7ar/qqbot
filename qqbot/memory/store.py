@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from qqbot.sqlite_schema import ensure_column
+from qqbot.storage.sqlite import ensure_column
 
 
 @dataclass(frozen=True, slots=True)

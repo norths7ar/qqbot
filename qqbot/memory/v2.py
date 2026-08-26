@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from qqbot.sqlite_schema import ensure_column
+from qqbot.storage.sqlite import ensure_column
 
 MEMORY_V2_SCHEMA_VERSION = 2
 CLAIM_SCOPES = frozenset({"person", "group"})

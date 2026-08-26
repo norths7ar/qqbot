@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from qqbot.group_data import GroupDataStore
+from qqbot.storage.group_data import GroupDataStore
 
 
 class GroupDataStoreTests(unittest.TestCase):

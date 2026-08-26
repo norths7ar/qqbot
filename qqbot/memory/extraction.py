@@ -4,7 +4,7 @@ import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 
-from qqbot.group_data import GroupDataStore, GroupMessageRecord
+from qqbot.storage.group_data import GroupDataStore, GroupMessageRecord
 from qqbot.integrations.llm import DeepSeekClient
 from qqbot.memory.store import MemoryStore
 

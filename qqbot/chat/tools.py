@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 
 from qqbot.runtime.audit import AuditLog
-from qqbot.group_data import GroupDataStore
+from qqbot.storage.group_data import GroupDataStore
 from qqbot.identity import (
     canonical_speaker_name,
     format_group_roster,
