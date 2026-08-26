@@ -12,7 +12,7 @@ V2 的 claim、evidence、assertor、冲突和 supersession 只能先作为评�
 
 ## 当前评估入口与维度
 
-`python -m qqbot.memory_replay --source <source.db> --output <temporary.db>` 会用 SQLite `mode=ro` 打开源库，拒绝源/目标相同或覆盖已有目标，然后只在副本上初始化 schema 并汇总 shadow batch。报告会暴露 raw response 的 operation 解析、批次状态、rejection/duplicate、claim status、evidence 数量和 assertor；没有人工标注 ground truth 时不声称 precision/recall。
+`python -m qqbot.memory_replay --source <source.db> --output <temporary.db>` 会用 SQLite `mode=ro` 打开源库，拒绝源/目标相同或覆盖已有目标，然后只在副本上初始化 schema 并汇总 shadow batch。若同时传入 `--group-source <group_tools.db>`，群聊库也会以只读方式复制到旁边的显式副本，并用 `GroupDataStore` 检查 evidence 消息是否仍可解析。报告会暴露 raw response 的 operation 解析、批次状态、rejection/duplicate、claim status、evidence 数量和 assertor；没有人工标注 ground truth 时不声称 precision/recall。
 
 后续评估至少需要覆盖：
 

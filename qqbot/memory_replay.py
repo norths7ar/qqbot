@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Sequence
 from urllib.parse import quote
 
+from qqbot.group_data import GroupDataStore
 from qqbot.memory_v2 import ClaimStore, parse_operations
 
 
@@ -18,6 +19,7 @@ from qqbot.memory_v2 import ClaimStore, parse_operations
 class ShadowReplayReport:
     source_database: str
     output_database: str
+    group_output_database: str | None
     schema_version: int
     batch_count: int
     completed_batch_count: int
@@ -32,6 +34,8 @@ class ShadowReplayReport:
     claim_count: int
     claims_by_status: dict[str, int]
     evidence_count: int
+    evidence_message_count: int
+    missing_evidence_message_count: int
     assertors: dict[str, int]
     ground_truth_available: bool = False
     notes: tuple[str, ...] = (
@@ -66,11 +70,22 @@ def copy_sqlite_readonly(source: Path, target: Path) -> None:
         source_connection.close()
 
 
-def build_shadow_replay_report(source: Path, output: Path) -> ShadowReplayReport:
+def build_shadow_replay_report(
+    source: Path,
+    output: Path,
+    *,
+    group_source: Path | None = None,
+) -> ShadowReplayReport:
     """Copy source read-only, initialize only the copy, and summarize its batches."""
     copy_sqlite_readonly(source, output)
     store = ClaimStore(output)
     store.initialize()
+    group_store: GroupDataStore | None = None
+    group_output: Path | None = None
+    if group_source is not None:
+        group_output = output.with_name(f"{output.stem}.group.db")
+        copy_sqlite_readonly(group_source, group_output)
+        group_store = GroupDataStore(group_output)
     batches = store.list_shadow_batches(limit=200)
     operation_types: Counter[str] = Counter()
     parsed_batch_count = 0
@@ -98,18 +113,26 @@ def build_shadow_replay_report(source: Path, output: Path) -> ShadowReplayReport
     claims_by_status = Counter(claim.status for claim in claims)
     assertors: Counter[str] = Counter()
     evidence_count = 0
+    evidence_message_ids: list[int] = []
     for claim in claims:
         if claim.asserted_by_person_id:
             assertors[claim.asserted_by_person_id] += 1
         evidence = store.evidence_for_claim(claim.claim_id)
         evidence_count += len(evidence)
+        evidence_message_ids.extend(item.group_message_id for item in evidence)
         for item in evidence:
             if item.asserted_by_person_id:
                 assertors[item.asserted_by_person_id] += 1
+    evidence_message_count = 0
+    if group_store is not None:
+        evidence_message_count = len(
+            group_store.messages_by_ids(list(dict.fromkeys(evidence_message_ids)))
+        )
 
     return ShadowReplayReport(
         source_database=str(source.resolve()),
         output_database=str(output.resolve()),
+        group_output_database=str(group_output.resolve()) if group_output else None,
         schema_version=store.schema_version(),
         batch_count=len(batches),
         completed_batch_count=sum(batch.status == "completed" for batch in batches),
@@ -124,6 +147,8 @@ def build_shadow_replay_report(source: Path, output: Path) -> ShadowReplayReport
         claim_count=len(claims),
         claims_by_status=dict(sorted(claims_by_status.items())),
         evidence_count=evidence_count,
+        evidence_message_count=evidence_message_count,
+        missing_evidence_message_count=max(0, len(set(evidence_message_ids)) - evidence_message_count),
         assertors=dict(sorted(assertors.items())),
     )
 
@@ -134,12 +159,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--group-source",
+        type=Path,
+        help="optional group_tools.db source for evidence-message availability checks",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
-    report = build_shadow_replay_report(arguments.source, arguments.output)
+    report = build_shadow_replay_report(
+        arguments.source,
+        arguments.output,
+        group_source=arguments.group_source,
+    )
     print(json.dumps(asdict(report), ensure_ascii=False, indent=2))
     return 0
 
