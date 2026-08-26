@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from qqbot.memory_replay import build_shadow_replay_report, copy_sqlite_readonly
+from qqbot.memory.replay import build_shadow_replay_report, copy_sqlite_readonly
 from qqbot.memory_v2 import ClaimStore
 
 
