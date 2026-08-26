@@ -10,8 +10,15 @@ NoneBot2 使用 FastAPI 驱动并负责上层逻辑。
 - `bot.py`：NoneBot 的显式运行入口，供 `nb run` 和后台脚本共用。
 - `.env`：本地运行配置与密钥，不提交到 Git。
 - `.env.example`：需要手工填写的配置项模板。
-- `qqbot/plugins/llm_chat/`：受群白名单和 @ 触发限制的 DeepSeek 聊天插件。
-- `qqbot/multimodal.py`：受大小与格式限制的图片下载和 MiMo 视觉观察。
+- `qqbot/plugins/`：NoneBot 插件入口，只负责 matcher 注册、依赖装配和事件转交。
+- `qqbot/chat/`：聊天编排、提示词、工具执行和异步记忆任务。
+- `qqbot/messaging/`：OneBot 消息解析、当前发言者与引用上下文协议、提示注入检查和显式命令路由。
+- `qqbot/memory/`：V1 记忆存储与提取、V2 shadow claims、审查 CLI 和运行时单例。
+- `qqbot/integrations/`：DeepSeek、MiMo 和 Web 服务客户端。
+- `qqbot/storage/`：群消息 SQLite 仓库、schema 辅助函数和共享运行实例。
+- `qqbot/runtime/`：进程身份、运行状态与结构化审计日志。
+- `qqbot/identity.py` 与 `qqbot/menu.py`：群友身份展示和菜单领域逻辑。
+- `qqbot/memory_admin.py`、`qqbot/memory_v2.py` 与 `qqbot/group_data.py`：为现有 CLI 或旧导入保留的兼容入口。
 - `tests/`：不访问外部服务的单元测试。
 
 ## 本地运行
