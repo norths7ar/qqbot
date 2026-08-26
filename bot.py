@@ -19,6 +19,12 @@ def main() -> None:
         driver = nonebot.get_driver()
         driver.register_adapter(OneBotV11Adapter)
         nonebot.load_from_toml("pyproject.toml")
+        # The plugin loader has already imported the process-wide runtime store.
+        # Read that same instance after all plugins initialize; do not create a
+        # second ClaimStore just for readiness metadata.
+        from qqbot.memory_v2_runtime import claim_store
+
+        guard.mark_ready(memory_schema_version=claim_store.schema_version())
         nonebot.run()
     finally:
         guard.release()

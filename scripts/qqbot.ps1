@@ -134,6 +134,22 @@ function Read-BotState {
     }
 }
 
+function Get-WorkspaceGitCommit {
+    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+    if ($null -eq $gitCommand) {
+        return "unknown"
+    }
+    $commit = & $gitCommand.Source @("rev-parse", "HEAD") 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return "unknown"
+    }
+    $normalized = ([string]$commit).Trim()
+    if (-not $normalized) {
+        return "unknown"
+    }
+    return $normalized
+}
+
 function Get-ValidatedBotProcess {
     $state = Read-BotState
     if ($null -eq $state) {
@@ -422,10 +438,33 @@ function Show-BotStatus {
     $managed = Get-ValidatedBotProcess
     if ($null -ne $managed) {
         $stateKind = if ($managed.Legacy) { "legacy" } else { "current" }
-        Write-Output (
-            "qqbot is running. PID: $($managed.Process.Id). " +
-            "Started: $($managed.Process.StartTime). State: $stateKind."
-        )
+        $state = $managed.State
+        $stateReady = if ($state.PSObject.Properties["ready"]) {
+            [string]$state.ready
+        }
+        else { "unknown" }
+        $runtimeCommit = if ($state.PSObject.Properties["git_commit"]) {
+            [string]$state.git_commit
+        }
+        else { "unknown" }
+        $workspaceCommit = Get-WorkspaceGitCommit
+        $schema = if ($state.PSObject.Properties["memory_schema_version"]) {
+            [string]$state.memory_schema_version
+        }
+        else { "unknown" }
+        $pythonPrefix = if ($state.PSObject.Properties["python_prefix"]) {
+            [string]$state.python_prefix
+        }
+        else { "unknown" }
+        Write-Output "qqbot is running. PID: $($managed.Process.Id). State: $stateKind."
+        Write-Output "Commit: $runtimeCommit (workspace HEAD: $workspaceCommit)"
+        Write-Output "Started: $([string]$state.started_at). Ready: $stateReady. ReadyAt: $([string]$state.ready_at)"
+        Write-Output "Python: $([string]$state.python). Prefix: $pythonPrefix. Memory schema: $schema"
+        if ($runtimeCommit -ne "unknown" -and
+            $workspaceCommit -ne "unknown" -and
+            $runtimeCommit -ne $workspaceCommit) {
+            Write-Warning "Running commit differs from workspace HEAD. Manual restart is required; no automatic restart will be attempted."
+        }
         return
     }
     $legacy = Get-LegacyBotProcess
