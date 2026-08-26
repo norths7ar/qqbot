@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from qqbot.storage.group_data import GroupDataStore, GroupMessageRecord
-from qqbot.integrations.llm import DeepSeekClient
+from qqbot.integrations.llm import MiMoClient
 from qqbot.memory.v2 import CLAIM_OPERATIONS, ClaimStore, MemoryClaim, parse_operations
 
 
@@ -30,7 +30,7 @@ class ShadowMemoryExtractor:
 
     def __init__(
         self,
-        client: DeepSeekClient,
+        client: MiMoClient,
         claim_store: ClaimStore,
         group_store: GroupDataStore,
         *,

@@ -51,10 +51,9 @@ class ChatServiceInputBoundaryTests(unittest.TestCase):
         self.group_store.initialize()
         self.client = _FakeClient()
         config = Config(
-            deepseek_api_key=SecretStr("test"),
+            mimo_api_key=SecretStr("test"),
             llm_allowed_groups=frozenset({1}),
             llm_cooldown_seconds=0,
-            mimo_multimodal_enabled=False,
         )
         self.service = ChatService(
             config=config,
@@ -63,7 +62,7 @@ class ChatServiceInputBoundaryTests(unittest.TestCase):
             cooldown=Cooldown(0),
             client=self.client,
             tavily=SimpleNamespace(available=False),
-            vision_client=SimpleNamespace(available=False),
+            image_loader=SimpleNamespace(),
             memory_store=self.memory_store,
             group_data_store=self.group_store,
             memory_jobs=_FakeMemoryJobs(),

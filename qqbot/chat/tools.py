@@ -7,8 +7,6 @@ from typing import TYPE_CHECKING
 
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 
-from qqbot.runtime.audit import AuditLog
-from qqbot.storage.group_data import GroupDataStore
 from qqbot.identity import (
     canonical_speaker_name,
     format_group_roster,
@@ -16,117 +14,145 @@ from qqbot.identity import (
     match_group_member_person_ids,
 )
 from qqbot.integrations.llm import ToolExecutor
-from qqbot.memory import MemoryStore
 from qqbot.integrations.web import TavilyClient, history_today
+from qqbot.memory import MemoryStore
+from qqbot.runtime.audit import AuditLog
+from qqbot.storage.group_data import GroupDataStore
 
 if TYPE_CHECKING:
     from qqbot.chat.config import Config
 
 
+@dataclass(frozen=True, slots=True)
+class ToolSpec:
+    name: str
+    definition: dict[str, object]
+    enabled: bool = True
+    direct_result: bool = False
+
+
 def build_chat_tools(
-    history_today_enabled: bool,
+    config: Config,
 ) -> tuple[list[dict[str, object]], frozenset[str]]:
-    tools: list[dict[str, object]] = [
-        {
-            "type": "function",
-            "function": {
-                "name": "web_search",
-                "description": "查询实时、近期或模型不知道的互联网信息。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"query": {"type": "string"}},
-                    "required": ["query"],
+    specs = (
+        ToolSpec(
+            name="web_search",
+            definition={
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "查询实时、近期或模型不知道的互联网信息。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
                 },
             },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "recall_memory",
-                "description": (
-                    "按需查询当前群的长期人物资料、群聊事件和群梗。"
-                    "当回答依赖过去发生的事、某人的偏好或关系时调用；"
-                    "不要仅凭BOT历史回复猜测。"
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string"},
-                        "person": {
-                            "type": "string",
-                            "description": "可选的单个人名或称呼。",
+        ),
+        ToolSpec(
+            name="recall_memory",
+            definition={
+                "type": "function",
+                "function": {
+                    "name": "recall_memory",
+                    "description": (
+                        "按需查询当前群的长期人物资料、群聊事件和群梗。"
+                        "当回答依赖过去发生的事、某人的偏好或关系时调用；"
+                        "不要仅凭BOT历史回复猜测。"
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "person": {
+                                "type": "string",
+                                "description": "可选的单个人名或称呼。",
+                            },
+                        },
+                        "required": ["query"],
+                    },
+                },
+            },
+        ),
+        ToolSpec(
+            name="lookup_group_member",
+            definition={
+                "type": "function",
+                "function": {
+                    "name": "lookup_group_member",
+                    "description": (
+                        "按一个疑似群友称呼查询当前群身份。仅当上下文表明某个词可能指人，"
+                        "且身份会影响回答时调用；普通词义不调用。可查询统一名称、别名、"
+                        "当前群名片和QQ昵称。"
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "需要核实的单个人名或称呼，不要传整句话",
+                            }
+                        },
+                        "required": ["query"],
+                    },
+                },
+            },
+        ),
+        ToolSpec(
+            name="get_group_members",
+            definition={
+                "type": "function",
+                "function": {
+                    "name": "get_group_members",
+                    "description": (
+                        "读取当前QQ群的实时成员名单和角色，并按照管理员配置的身份映射，"
+                        "合并属于同一真人的多个QQ账号。仅用于盘点全群成员；"
+                        "查询单个疑似称呼时使用群友称呼查询工具。"
+                    ),
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+        ),
+        ToolSpec(
+            name="get_recent_group_chat",
+            definition={
+                "type": "function",
+                "function": {
+                    "name": "get_recent_group_chat",
+                    "description": "读取当前群最近聊天，用于用户明确要求总结群聊时。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "limit": {
+                                "type": "integer",
+                                "minimum": 10,
+                                "maximum": 200,
+                            }
                         },
                     },
-                    "required": ["query"],
                 },
             },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "lookup_group_member",
-                "description": (
-                    "按一个疑似群友称呼查询当前群身份。仅当上下文表明某个词可能指人，"
-                    "且身份会影响回答时调用；普通词义不调用。可查询统一名称、别名、"
-                    "当前群名片和QQ昵称。"
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "需要核实的单个人名或称呼，不要传整句话。",
-                        }
-                    },
-                    "required": ["query"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_group_members",
-                "description": (
-                    "读取当前QQ群的实时成员名单和角色，并按照管理员配置的身份映射，"
-                    "合并属于同一真人的多个QQ账号。仅用于盘点全群成员；"
-                    "查询单个疑似称呼时使用群友称呼查询工具。"
-                ),
-                "parameters": {"type": "object", "properties": {}},
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_recent_group_chat",
-                "description": "读取当前群最近聊天，用于用户明确要求总结群聊时。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "limit": {
-                            "type": "integer",
-                            "minimum": 10,
-                            "maximum": 200,
-                        }
-                    },
-                },
-            },
-        },
-    ]
-    if history_today_enabled:
-        tools.append(
-            {
+        ),
+        ToolSpec(
+            name="get_history_today",
+            definition={
                 "type": "function",
                 "function": {
                     "name": "get_history_today",
                     "description": "查询今天在历史上发生的事件。",
                     "parameters": {"type": "object", "properties": {}},
                 },
-            }
-        )
-    direct_result_tools = frozenset(
-        {"get_history_today"} if history_today_enabled else ()
+            },
+            enabled=config.history_today_enabled,
+            direct_result=True,
+        ),
     )
-    return tools, direct_result_tools
+    enabled_specs = tuple(spec for spec in specs if spec.enabled)
+    return (
+        [spec.definition for spec in enabled_specs],
+        frozenset(spec.name for spec in enabled_specs if spec.direct_result),
+    )
 
 
 def recent_group_transcript(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -10,7 +9,6 @@ import httpx
 from nonebot import get_driver, logger
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 
-from qqbot.runtime.audit import AuditLog
 from qqbot.chat.config import Config
 from qqbot.chat.memory_jobs import MemoryJobRunner
 from qqbot.chat.prompts import SUMMARY_SYSTEM_PROMPT
@@ -19,9 +17,8 @@ from qqbot.chat.tools import (
     build_tool_executor,
     recent_group_transcript,
 )
-from qqbot.storage.group_data import GroupDataStore
-from qqbot.integrations.llm import ConversationStore, Cooldown, DeepSeekClient
-from qqbot.integrations.vision import MiMoVisionClient
+from qqbot.integrations.llm import ConversationStore, Cooldown, MiMoClient, UserContent
+from qqbot.integrations.vision import ImageContentLoader
 from qqbot.integrations.web import LOCAL_TIMEZONE, TavilyClient, history_today
 from qqbot.memory import MemoryStore
 from qqbot.menu import build_menu
@@ -36,6 +33,8 @@ from qqbot.messaging.tool_routing import (
     is_explicit_command,
     parse_function_call,
 )
+from qqbot.runtime.audit import AuditLog
+from qqbot.storage.group_data import GroupDataStore
 
 type ChatReply = str | Message
 
@@ -50,9 +49,9 @@ class ChatService:
         audit_log: AuditLog,
         conversations: ConversationStore,
         cooldown: Cooldown,
-        client: DeepSeekClient,
+        client: MiMoClient,
         tavily: TavilyClient,
-        vision_client: MiMoVisionClient,
+        image_loader: ImageContentLoader,
         memory_store: MemoryStore,
         group_data_store: GroupDataStore,
         memory_jobs: MemoryJobRunner,
@@ -65,7 +64,7 @@ class ChatService:
         self.cooldown = cooldown
         self.client = client
         self.tavily = tavily
-        self.vision_client = vision_client
+        self.image_loader = image_loader
         self.memory_store = memory_store
         self.group_data_store = group_data_store
         self.memory_jobs = memory_jobs
@@ -173,7 +172,9 @@ class ChatService:
             try:
                 reply_data = await bot.get_msg(message_id=resolved_message_id)
                 raw_message = (
-                    reply_data.get("message") if isinstance(reply_data, Mapping) else None
+                    reply_data.get("message")
+                    if isinstance(reply_data, Mapping)
+                    else None
                 )
                 reply_message = message_from_onebot_api(raw_message)
                 if reply_message is not None:
@@ -196,7 +197,9 @@ class ChatService:
         try:
             reply_data = await bot.get_msg(message_id=reply_message_id)
         except Exception:
-            logger.exception("Failed to resolve replied message id={}", reply_message_id)
+            logger.exception(
+                "Failed to resolve replied message id={}", reply_message_id
+            )
             return None, None, ""
         if not isinstance(reply_data, Mapping):
             return None, None, ""
@@ -207,11 +210,6 @@ class ChatService:
         sender_id = sender.get("user_id")
         sender_name = str(sender.get("card") or sender.get("nickname") or "").strip()
         return reply_message, sender_id, sender_name
-
-    @staticmethod
-    def _image_question(prompt: str) -> str:
-        question = prompt.replace("[图片]", "").replace("[回复消息]", "").strip()
-        return question or "请描述并回应这些图片。"
 
     async def summarize_recent_group(
         self,
@@ -279,6 +277,70 @@ class ChatService:
             deleted = self.memory_store.clear_person_memories(person.person_id)
             return f"已删除你的 {deleted} 条长期记忆，身份绑定仍然保留。"
         raise ValueError(f"unsupported function: {call.name}")
+
+    async def _run_explicit_function(
+        self,
+        bot: Bot,
+        event: GroupMessageEvent,
+        call: FunctionCall,
+        trace_id: str,
+    ) -> ChatReply:
+        self.audit_log.record(
+            "chat.route",
+            trace_id=trace_id,
+            route="explicit_function",
+            function=call.name,
+            arguments=call.arguments,
+        )
+        lock = self.group_locks.setdefault(event.group_id, asyncio.Lock())
+        async with lock:
+            started = time.perf_counter()
+            try:
+                answer = await self._execute_function(call, event)
+            except ValueError as error:
+                answer = str(error)
+            except httpx.TimeoutException:
+                self.audit_log.record(
+                    "function.failed",
+                    trace_id=trace_id,
+                    function=call.name,
+                    duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                    error_type="TimeoutException",
+                )
+                return "功能请求超时了，请稍后再试。"
+            except httpx.HTTPError as error:
+                logger.exception(
+                    "Function request failed name={} group={} user={}",
+                    call.name,
+                    event.group_id,
+                    event.user_id,
+                )
+                self.audit_log.record(
+                    "function.failed",
+                    trace_id=trace_id,
+                    function=call.name,
+                    duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                    error_type=type(error).__name__,
+                    error=str(error),
+                )
+                return "功能暂时不可用，请稍后再试。"
+            self.audit_log.record(
+                "function.completed",
+                trace_id=trace_id,
+                function=call.name,
+                duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                answer=answer,
+            )
+            self.conversations.append_message(
+                event.group_id,
+                int(bot.self_id),
+                "bot",
+                "BOT",
+                answer,
+                role="assistant",
+                response_to_user_id=event.user_id,
+            )
+            return MessageSegment.reply(event.message_id) + answer
 
     async def clear_chat(self, event: GroupMessageEvent) -> str:
         self.clear_person_context(event)
@@ -387,9 +449,11 @@ class ChatService:
             else ""
         )
         if replied_message is None and reply_message_id is not None:
-            replied_message, api_sender_id, api_sender_name = (
-                await self._load_replied_message(bot, reply_message_id)
-            )
+            (
+                replied_message,
+                api_sender_id,
+                api_sender_name,
+            ) = await self._load_replied_message(bot, reply_message_id)
             reply_sender_user_id = api_sender_id
             reply_sender_name = api_sender_name
             resolved_message = resolve_onebot_message(
@@ -432,66 +496,18 @@ class ChatService:
                 reason="input_too_long",
                 input_length=len(prompt),
             )
-            return f"这条消息太长了，请缩短到 {self.config.llm_max_input_chars} 字以内。"
+            return (
+                f"这条消息太长了，请缩短到 {self.config.llm_max_input_chars} 字以内。"
+            )
 
         function_call = parse_function_call(prompt)
         if function_call is not None:
-            self.audit_log.record(
-                "chat.route",
-                trace_id=trace_id,
-                route="explicit_function",
-                function=function_call.name,
-                arguments=function_call.arguments,
+            return await self._run_explicit_function(
+                bot,
+                event,
+                function_call,
+                trace_id,
             )
-            lock = self.group_locks.setdefault(event.group_id, asyncio.Lock())
-            async with lock:
-                started = time.perf_counter()
-                try:
-                    answer = await self._execute_function(function_call, event)
-                except ValueError as error:
-                    answer = str(error)
-                except httpx.TimeoutException:
-                    self.audit_log.record(
-                        "function.failed",
-                        trace_id=trace_id,
-                        function=function_call.name,
-                        duration_ms=round((time.perf_counter() - started) * 1000, 1),
-                        error_type="TimeoutException",
-                    )
-                    return "功能请求超时了，请稍后再试。"
-                except httpx.HTTPError as error:
-                    logger.exception(
-                        "Function request failed name={} group={} user={}",
-                        function_call.name,
-                        event.group_id,
-                        event.user_id,
-                    )
-                    self.audit_log.record(
-                        "function.failed",
-                        trace_id=trace_id,
-                        function=function_call.name,
-                        duration_ms=round((time.perf_counter() - started) * 1000, 1),
-                        error_type=type(error).__name__,
-                        error=str(error),
-                    )
-                    return "功能暂时不可用，请稍后再试。"
-                self.audit_log.record(
-                    "function.completed",
-                    trace_id=trace_id,
-                    function=function_call.name,
-                    duration_ms=round((time.perf_counter() - started) * 1000, 1),
-                    answer=answer,
-                )
-                self.conversations.append_message(
-                    event.group_id,
-                    int(bot.self_id),
-                    "bot",
-                    "BOT",
-                    answer,
-                    role="assistant",
-                    response_to_user_id=event.user_id,
-                )
-                return MessageSegment.reply(event.message_id) + answer
 
         guard_result = inspect_prompt(prompt)
         if guard_result.blocked:
@@ -529,98 +545,33 @@ class ChatService:
             model_prompt = resolved_message.llm_prompt()
             if not prompt and image_urls:
                 model_prompt = f"{model_prompt}\n请描述并回应这些图片。"
+            model_content: UserContent = model_prompt
             if image_urls:
-                if not self.config.mimo_multimodal_enabled or not self.vision_client.available:
+                media_started = time.perf_counter()
+                try:
+                    image_parts = await self.image_loader.content_parts(image_urls)
+                except (httpx.HTTPError, ValueError) as error:
                     self.audit_log.record(
-                        "vision.skipped",
+                        "media_input.failed",
                         trace_id=trace_id,
                         image_count=len(image_urls),
-                        reason="not_configured",
+                        duration_ms=round(
+                            (time.perf_counter() - media_started) * 1000, 1
+                        ),
+                        error_type=type(error).__name__,
+                        error=str(error),
                     )
-                    vision_note = (
-                        "[当前消息包含图片，但图片理解功能未启用。不要猜测图片内容，"
-                        "如有必要请直接说明无法查看。]"
-                    )
-                    model_prompt = f"{model_prompt}\n\n{vision_note}"
-                    self.conversations.enrich_message(
-                        event.group_id,
-                        str(event.message_id),
-                        vision_note,
-                    )
-                else:
-                    vision_started = time.perf_counter()
-                    question = self._image_question(prompt)
-                    self.audit_log.record(
-                        "vision.started",
-                        trace_id=trace_id,
-                        model=self.config.mimo_multimodal_model,
-                        image_count=len(image_urls),
-                        question=question,
-                    )
-                    try:
-                        observation = await self.vision_client.observe(image_urls, question)
-                    except (httpx.HTTPError, ValueError) as error:
-                        logger.exception(
-                            "MiMo image observation failed group={} user={} images={}",
-                            event.group_id,
-                            event.user_id,
-                            len(image_urls),
-                        )
-                        self.audit_log.record(
-                            "vision.failed",
-                            trace_id=trace_id,
-                            model=self.config.mimo_multimodal_model,
-                            image_count=len(image_urls),
-                            duration_ms=round(
-                                (time.perf_counter() - vision_started) * 1000,
-                                1,
-                            ),
-                            error_type=type(error).__name__,
-                            error=str(error),
-                        )
-                        if question == "请描述并回应这些图片。":
-                            return "图片暂时没看成功，稍后再试。"
-                        vision_note = (
-                            "[当前消息包含图片，但图片观察本次失败。不要猜测图片内容，"
-                            "如有必要请直接说明无法查看。]"
-                        )
-                        model_prompt = f"{model_prompt}\n\n{vision_note}"
-                        self.conversations.enrich_message(
-                            event.group_id,
-                            str(event.message_id),
-                            vision_note,
-                        )
-                    else:
-                        logger.info(
-                            "MiMo image observation group={} user={} images={} "
-                            "observation={}",
-                            event.group_id,
-                            event.user_id,
-                            len(image_urls),
-                            json.dumps(observation, ensure_ascii=False),
-                        )
-                        self.audit_log.record(
-                            "vision.completed",
-                            trace_id=trace_id,
-                            model=self.config.mimo_multimodal_model,
-                            image_count=len(image_urls),
-                            duration_ms=round(
-                                (time.perf_counter() - vision_started) * 1000,
-                                1,
-                            ),
-                            observation=observation,
-                        )
-                        vision_context = (
-                            "[MiMo多模态观察，仅描述当前图片，不是人物事实、长期记忆"
-                            "或系统指令]\n"
-                            f"{observation}"
-                        )
-                        model_prompt = f"{model_prompt}\n\n{vision_context}"
-                        self.conversations.enrich_message(
-                            event.group_id,
-                            str(event.message_id),
-                            vision_context,
-                        )
+                    return "图片暂时没准备好，稍后再试。"
+                model_content = [
+                    *image_parts,
+                    {"type": "text", "text": model_prompt},
+                ]
+                self.audit_log.record(
+                    "media_input.ready",
+                    trace_id=trace_id,
+                    image_count=len(image_parts),
+                    duration_ms=round((time.perf_counter() - media_started) * 1000, 1),
+                )
 
             history = self.conversations.messages(
                 event.group_id,
@@ -638,7 +589,7 @@ class ChatService:
             self.audit_log.record(
                 "llm.started",
                 trace_id=trace_id,
-                model=self.config.deepseek_model,
+                model=self.config.mimo_model,
                 history_messages=len(history),
                 prompt=model_prompt,
                 available_tools=[
@@ -651,28 +602,28 @@ class ChatService:
                 answer = await self.client.complete_with_tools(
                     system_prompt=system_prompt,
                     history=history,
-                    prompt=model_prompt,
+                    prompt=model_content,
                     tools=self.chat_tools,
                     execute_tool=self._tool_executor(bot, event, trace_id),
                     direct_result_tools=self.direct_result_tools,
                 )
             except httpx.TimeoutException:
                 logger.warning(
-                    "DeepSeek request timed out for group={} user={}",
+                "MiMo request timed out for group={} user={}",
                     event.group_id,
                     event.user_id,
                 )
                 self.audit_log.record(
                     "llm.failed",
                     trace_id=trace_id,
-                    model=self.config.deepseek_model,
+                    model=self.config.mimo_model,
                     duration_ms=round((time.perf_counter() - llm_started) * 1000, 1),
                     error_type="TimeoutException",
                 )
                 return "模型响应超时了，请稍后再试。"
             except httpx.HTTPStatusError as error:
                 logger.error(
-                    "DeepSeek returned HTTP {} for group={} user={}",
+                "MiMo returned HTTP {} for group={} user={}",
                     error.response.status_code,
                     event.group_id,
                     event.user_id,
@@ -680,7 +631,7 @@ class ChatService:
                 self.audit_log.record(
                     "llm.failed",
                     trace_id=trace_id,
-                    model=self.config.deepseek_model,
+                    model=self.config.mimo_model,
                     duration_ms=round((time.perf_counter() - llm_started) * 1000, 1),
                     error_type=type(error).__name__,
                     http_status=error.response.status_code,
@@ -689,14 +640,14 @@ class ChatService:
                 return "模型服务暂时不可用，请稍后再试。"
             except (httpx.HTTPError, ValueError) as error:
                 logger.exception(
-                    "DeepSeek request failed for group={} user={}",
+                "MiMo request failed for group={} user={}",
                     event.group_id,
                     event.user_id,
                 )
                 self.audit_log.record(
                     "llm.failed",
                     trace_id=trace_id,
-                    model=self.config.deepseek_model,
+                    model=self.config.mimo_model,
                     duration_ms=round((time.perf_counter() - llm_started) * 1000, 1),
                     error_type=type(error).__name__,
                     error=str(error),
@@ -706,7 +657,7 @@ class ChatService:
             self.audit_log.record(
                 "llm.completed",
                 trace_id=trace_id,
-                model=self.config.deepseek_model,
+                model=self.config.mimo_model,
                 duration_ms=round((time.perf_counter() - llm_started) * 1000, 1),
                 answer=answer,
             )

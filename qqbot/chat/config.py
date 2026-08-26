@@ -6,9 +6,9 @@ from qqbot.chat.prompts import DEFAULT_SYSTEM_PROMPT
 
 
 class Config(BaseModel):
-    deepseek_api_key: SecretStr
-    deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-flash"
+    mimo_api_key: SecretStr
+    mimo_base_url: str = "https://api.xiaomimimo.com/v1"
+    mimo_model: str = "mimo-v2.5"
     llm_allowed_groups: frozenset[int] = frozenset({482997153})
     llm_context_turns: int = Field(default=50, ge=5, le=200)
     llm_assistant_context_turns: int = Field(default=3, ge=0, le=20)
@@ -19,10 +19,6 @@ class Config(BaseModel):
     llm_cooldown_seconds: float = Field(default=3, ge=0, le=60)
     llm_max_concurrency: int = Field(default=2, ge=1, le=10)
     tavily_api_key: SecretStr = SecretStr("")
-    mimo_api_key: SecretStr = SecretStr("")
-    mimo_base_url: str = "https://api.xiaomimimo.com/v1"
-    mimo_multimodal_model: str = ""
-    mimo_multimodal_enabled: bool = False
     mimo_max_images: int = Field(default=4, ge=1, le=8)
     mimo_max_image_bytes: int = Field(
         default=10 * 1024 * 1024,

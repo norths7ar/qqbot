@@ -13,6 +13,7 @@ import httpx
 from qqbot.messaging.plain_text import to_qq_plain_text
 
 type Role = Literal["system", "user", "assistant"]
+type UserContent = str | list[dict[str, object]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,7 +261,7 @@ class Cooldown:
         )
 
 
-class DeepSeekClient:
+class MiMoClient:
     def __init__(
         self,
         *,
@@ -283,16 +284,21 @@ class DeepSeekClient:
         *,
         system_prompt: str,
         history: Sequence[ChatMessage],
-        prompt: str,
+        prompt: UserContent,
     ) -> str:
         messages = [
             ChatMessage(role="system", content=system_prompt),
             *history,
-            ChatMessage(role="user", content=prompt),
+            {"role": "user", "content": prompt},
         ]
         payload = {
             "model": self._model,
-            "messages": [message.as_payload() for message in messages],
+            "messages": [
+                message.as_payload()
+                if isinstance(message, ChatMessage)
+                else message
+                for message in messages
+            ],
             "thinking": {"type": "disabled"},
             "max_tokens": self._max_output_tokens,
             "stream": False,
@@ -305,7 +311,7 @@ class DeepSeekClient:
         *,
         system_prompt: str,
         history: Sequence[ChatMessage],
-        prompt: str,
+        prompt: UserContent,
         tools: Sequence[Mapping[str, object]],
         execute_tool: ToolExecutor,
         max_rounds: int = 3,
@@ -315,7 +321,7 @@ class DeepSeekClient:
         messages: list[dict[str, object]] = [
             ChatMessage(role="system", content=system_prompt).as_payload(),
             *(message.as_payload() for message in history),
-            ChatMessage(role="user", content=prompt).as_payload(),
+            {"role": "user", "content": prompt},
         ]
         for _ in range(max_rounds):
             payload = {
@@ -333,7 +339,7 @@ class DeepSeekClient:
             if not tool_calls:
                 content = message.get("content")
                 if not isinstance(content, str) or not content.strip():
-                    raise ValueError("DeepSeek response content is empty")
+                    raise ValueError("MiMo response content is empty")
                 return to_qq_plain_text(content)
 
             messages.append(
@@ -365,7 +371,7 @@ class DeepSeekClient:
 
     async def _post(self, payload: Mapping[str, object]) -> Mapping[str, object]:
         headers = {
-            "Authorization": f"Bearer {self._api_key}",
+            "api-key": self._api_key,
             "Content-Type": "application/json",
         }
         async with (
