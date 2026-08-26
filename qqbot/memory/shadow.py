@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from qqbot.group_data import GroupDataStore, GroupMessageRecord
 from qqbot.llm import DeepSeekClient
-from qqbot.memory_v2 import CLAIM_OPERATIONS, ClaimStore, MemoryClaim, parse_operations
+from qqbot.memory.v2 import CLAIM_OPERATIONS, ClaimStore, MemoryClaim, parse_operations
 
 
 @dataclass(frozen=True, slots=True)

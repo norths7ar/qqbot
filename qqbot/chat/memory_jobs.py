@@ -10,8 +10,8 @@ from qqbot.group_data import GroupDataStore
 from qqbot.llm import DeepSeekClient
 from qqbot.memory import MemoryStore
 from qqbot.memory.extraction import MemoryExtractor
-from qqbot.memory_shadow import ShadowMemoryExtractor
-from qqbot.memory_v2 import ClaimStore
+from qqbot.memory.shadow import ShadowMemoryExtractor
+from qqbot.memory.v2 import ClaimStore
 
 from qqbot.chat.config import Config
 

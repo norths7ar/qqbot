@@ -17,7 +17,7 @@ from qqbot.chat.tools import build_chat_tools
 from qqbot.group_data_runtime import group_data_store
 from qqbot.llm import ConversationStore, Cooldown, DeepSeekClient
 from qqbot.memory.runtime import memory_store
-from qqbot.memory_v2_runtime import claim_store
+from qqbot.memory.v2_runtime import claim_store
 from qqbot.multimodal import MiMoVisionClient
 from qqbot.web_tools import TavilyClient
 

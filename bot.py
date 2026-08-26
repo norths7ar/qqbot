@@ -23,7 +23,7 @@ def main() -> None:
         # The plugin loader has already imported the process-wide runtime store.
         # Read that same instance after all plugins initialize; do not create a
         # second ClaimStore just for readiness metadata.
-        from qqbot.memory_v2_runtime import claim_store
+        from qqbot.memory.v2_runtime import claim_store
 
         runtime_state = guard.mark_ready(
             memory_schema_version=claim_store.schema_version()

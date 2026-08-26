@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from qqbot.memory import MemoryStore
-from qqbot.memory_v2 import ClaimStore, parse_operations
+from qqbot.memory.v2 import ClaimStore, parse_operations
 
 
 class ClaimStoreTests(unittest.TestCase):

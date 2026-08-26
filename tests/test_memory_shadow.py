@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 
 from qqbot.group_data import GroupDataStore
 from qqbot.memory import MemoryStore
-from qqbot.memory_shadow import ShadowMemoryExtractor
-from qqbot.memory_v2 import ClaimStore
+from qqbot.memory.shadow import ShadowMemoryExtractor
+from qqbot.memory.v2 import ClaimStore
 
 
 class ShadowMemoryExtractorTests(unittest.IsolatedAsyncioTestCase):
