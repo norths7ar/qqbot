@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
-from nonebot import get_plugin_config, on_command, on_message
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message
-from nonebot.params import CommandArg
+from nonebot import get_plugin_config, on_message
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
 
@@ -49,7 +48,6 @@ conversations = ConversationStore(
     ),
 )
 cooldown = Cooldown(plugin_config.llm_cooldown_seconds)
-COMMAND_ARGUMENT = CommandArg()
 client = MiMoClient(
     api_key=plugin_config.mimo_api_key.get_secret_value(),
     base_url=plugin_config.mimo_base_url,
@@ -111,48 +109,11 @@ async def allowed_group(event: GroupMessageEvent) -> bool:
 
 observe_group = on_message(rule=Rule(allowed_group), priority=1, block=False)
 chat = on_message(rule=Rule(allowed_mention), priority=10, block=False)
-clear_chat = on_command(
-    "清空对话",
-    rule=Rule(allowed_group),
-    priority=5,
-    block=True,
-)
-clear_group_chat = on_command(
-    "清空本群对话",
-    rule=Rule(allowed_group),
-    priority=5,
-    block=True,
-)
-summarize_chat = on_command(
-    "总结",
-    rule=Rule(allowed_group),
-    priority=5,
-    block=True,
-)
 
 
 @observe_group.handle()
 async def handle_observe_group(bot: Bot, event: GroupMessageEvent) -> None:
     await chat_service.observe_group(bot, event)
-
-
-@clear_chat.handle()
-async def handle_clear_chat(event: GroupMessageEvent) -> None:
-    await clear_chat.finish(await chat_service.clear_chat(event))
-
-
-@clear_group_chat.handle()
-async def handle_clear_group_chat(event: GroupMessageEvent) -> None:
-    await clear_group_chat.finish(await chat_service.clear_group_chat(event))
-
-
-@summarize_chat.handle()
-async def handle_summarize_chat(
-    event: GroupMessageEvent,
-    args: Message = COMMAND_ARGUMENT,
-) -> None:
-    raw_limit = args.extract_plain_text().strip()
-    await summarize_chat.finish(await chat_service.summarize_chat(event, raw_limit))
 
 
 @chat.handle()

@@ -14,8 +14,6 @@ FUNCTION_NAMES = {
     "帮助": "menu",
     "搜索": "search",
     "历史上的今天": "history_today",
-    "总结": "summarize_group",
-    "清空对话": "clear_chat",
     "我的记忆": "my_memories",
     "忘记我": "forget_me",
 }

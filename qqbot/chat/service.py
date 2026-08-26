@@ -11,7 +11,6 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, Message
 
 from qqbot.chat.config import Config
 from qqbot.chat.memory_jobs import MemoryJobRunner
-from qqbot.chat.prompts import SUMMARY_SYSTEM_PROMPT
 from qqbot.chat.tools import (
     ToolContext,
     build_tool_executor,
@@ -123,14 +122,6 @@ class ChatService:
         )
         self.memory_jobs.schedule(event.group_id)
 
-    def clear_person_context(self, event: GroupMessageEvent) -> bool:
-        person = self.memory_store.ensure_person_for_account(
-            event.user_id,
-            self._sender_name(event),
-        )
-        account_ids = self.memory_store.account_ids(person.person_id) or {event.user_id}
-        return self.conversations.clear_accounts(event.group_id, account_ids)
-
     def recent_group_transcript(self, group_id: int, limit: int) -> str:
         return recent_group_transcript(
             self.group_data_store,
@@ -211,21 +202,6 @@ class ChatService:
         sender_name = str(sender.get("card") or sender.get("nickname") or "").strip()
         return reply_message, sender_id, sender_name
 
-    async def summarize_recent_group(
-        self,
-        event: GroupMessageEvent,
-        raw_limit: str,
-    ) -> str:
-        limit = int(raw_limit) if raw_limit.isdigit() else 50
-        transcript = self.recent_group_transcript(event.group_id, limit)
-        if transcript == "当前还没有可总结的群聊记录。":
-            return transcript
-        return await self.client.complete(
-            system_prompt=SUMMARY_SYSTEM_PROMPT,
-            history=[],
-            prompt=transcript,
-        )
-
     def _format_own_memories(self, event: GroupMessageEvent) -> str:
         person = self.memory_store.ensure_person_for_account(
             event.user_id,
@@ -260,11 +236,6 @@ class ChatService:
             if not self.config.history_today_enabled:
                 return "历史上的今天当前未启用。"
             return await history_today()
-        if call.name == "summarize_group":
-            return await self.summarize_recent_group(event, call.arguments)
-        if call.name == "clear_chat":
-            self.clear_person_context(event)
-            return "已清空你在本群的短期对话上下文。"
         if call.name == "my_memories":
             return self._format_own_memories(event)
         if call.name == "forget_me":
@@ -342,30 +313,6 @@ class ChatService:
             )
             return MessageSegment.reply(event.message_id) + answer
 
-    async def clear_chat(self, event: GroupMessageEvent) -> str:
-        self.clear_person_context(event)
-        return "已清空你在本群的短期对话上下文。"
-
-    async def clear_group_chat(self, event: GroupMessageEvent) -> str:
-        if not self._is_superuser(event.user_id):
-            return "这个命令只允许机器人管理员使用。"
-        cleared = self.conversations.clear_group(event.group_id)
-        return (
-            f"已清空本群 {cleared} 位群友的LLM短期对话上下文。"
-            "用于总结的持久群聊记录未删除。"
-        )
-
-    async def summarize_chat(
-        self,
-        event: GroupMessageEvent,
-        raw_limit: str,
-    ) -> str:
-        try:
-            return await self.summarize_recent_group(event, raw_limit)
-        except (httpx.HTTPError, ValueError):
-            logger.exception("Failed to summarize group={}", event.group_id)
-            return "群聊总结暂时失败，稍后再试。"
-
     async def handle_chat(self, bot: Bot, event: GroupMessageEvent) -> ChatReply:
         person = self.memory_store.ensure_person_for_account(
             event.user_id,
@@ -404,35 +351,6 @@ class ChatService:
             current_image_count=len(resolved_message.image_urls),
             reply_message_id=resolved_message.reply_message_id,
         )
-
-        if prompt == "清空对话":
-            self.clear_person_context(event)
-            self.audit_log.record(
-                "chat.route",
-                trace_id=trace_id,
-                route="clear_chat",
-            )
-            return "已清空你在本群的对话上下文。"
-
-        if prompt == "清空本群对话":
-            if not self._is_superuser(event.user_id):
-                self.audit_log.record(
-                    "chat.rejected",
-                    trace_id=trace_id,
-                    reason="clear_group_requires_superuser",
-                )
-                return "这个命令只允许机器人管理员使用。"
-            cleared = self.conversations.clear_group(event.group_id)
-            self.audit_log.record(
-                "chat.route",
-                trace_id=trace_id,
-                route="clear_group_chat",
-                cleared=cleared,
-            )
-            return (
-                f"已清空本群 {cleared} 位群友的LLM短期对话上下文。"
-                "用于总结的持久群聊记录未删除。"
-            )
 
         replied_message = event.reply.message if event.reply is not None else None
         reply_message_id = (

@@ -11,8 +11,6 @@ def build_menu(*, is_superuser: bool, history_today_enabled: bool = True) -> str
         "功能",
         "菜单",
         "搜索 关键词",
-        "总结 [消息条数]",
-        "清空对话",
         "我的记忆",
         "忘记我 确认",
         "",
@@ -20,7 +18,7 @@ def build_menu(*, is_superuser: bool, history_today_enabled: bool = True) -> str
         "发送 B 站链接或 BV 号会自动解析。",
     ]
     if history_today_enabled:
-        history_position = lines.index("总结 [消息条数]")
+        history_position = lines.index("搜索 关键词")
         lines.insert(history_position, "历史上的今天")
     if is_superuser:
         lines.extend(
@@ -30,8 +28,7 @@ def build_menu(*, is_superuser: bool, history_today_enabled: bool = True) -> str
                 "/记住 @群友 内容",
                 "/查看记忆 @群友",
                 "/删除记忆 编号",
-                "/清空本群对话  清除LLM短期对话上下文",
-                "/清空群聊记录 确认  删除总结用持久记录",
+                "/清空群聊记录 确认  删除持久群聊记录",
             ]
         )
     return "\n".join(lines)
