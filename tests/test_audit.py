@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from qqbot.audit import AuditLog
+from qqbot.runtime.audit import AuditLog
 
 
 class AuditLogTests(unittest.TestCase):

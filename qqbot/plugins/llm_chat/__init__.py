@@ -9,7 +9,7 @@ from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
 
-from qqbot.audit import AuditLog
+from qqbot.runtime.audit import AuditLog
 from qqbot.chat.config import Config
 from qqbot.chat.memory_jobs import MemoryJobRunner
 from qqbot.chat.service import ChatService

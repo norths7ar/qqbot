@@ -5,7 +5,7 @@ import time
 
 from nonebot import logger
 
-from qqbot.audit import AuditLog
+from qqbot.runtime.audit import AuditLog
 from qqbot.group_data import GroupDataStore
 from qqbot.integrations.llm import DeepSeekClient
 from qqbot.memory import MemoryStore

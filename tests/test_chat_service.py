@@ -8,7 +8,7 @@ from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageSegme
 from nonebot.adapters.onebot.v11.event import Reply, Sender
 from pydantic import SecretStr
 
-from qqbot.audit import AuditLog
+from qqbot.runtime.audit import AuditLog
 from qqbot.chat.config import Config
 from qqbot.chat.service import ChatService
 from qqbot.group_data import GroupDataStore

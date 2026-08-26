@@ -10,7 +10,7 @@ import httpx
 from nonebot import get_driver, logger
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 
-from qqbot.audit import AuditLog
+from qqbot.runtime.audit import AuditLog
 from qqbot.chat.config import Config
 from qqbot.chat.memory_jobs import MemoryJobRunner
 from qqbot.chat.prompts import SUMMARY_SYSTEM_PROMPT

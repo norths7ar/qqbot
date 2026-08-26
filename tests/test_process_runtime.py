@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from qqbot.process_runtime import BotAlreadyRunningError, BotProcessGuard
+from qqbot.runtime.process import BotAlreadyRunningError, BotProcessGuard
 
 
 class BotProcessGuardTests(unittest.TestCase):

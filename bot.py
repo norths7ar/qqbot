@@ -4,7 +4,7 @@ import nonebot
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
-from qqbot.process_runtime import BotAlreadyRunningError, BotProcessGuard
+from qqbot.runtime.process import BotAlreadyRunningError, BotProcessGuard
 
 
 def main() -> None:
