@@ -8,7 +8,7 @@ from nonebot.rule import Rule
 
 from qqbot.chat.config import Config
 from qqbot.memory import MemoryEntry, Person
-from qqbot.memory.runtime import memory_store
+from qqbot.memory.runtime import get_memory_store
 
 __plugin_meta__ = PluginMetadata(
     name="统一命令",
@@ -21,6 +21,7 @@ __plugin_meta__ = PluginMetadata(
 
 
 plugin_config = get_plugin_config(Config)
+memory_store = get_memory_store()
 
 
 async def allowed_group(event: GroupMessageEvent) -> bool:
@@ -103,7 +104,6 @@ async def handle_remember(
         entry = memory_store.add_memory(
             person.person_id,
             content,
-            created_by=str(event.user_id),
             group_id=event.group_id,
         )
     except ValueError as error:

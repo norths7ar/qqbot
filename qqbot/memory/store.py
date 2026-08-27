@@ -28,7 +28,6 @@ class MemoryEntry:
     person_id: str
     group_id: int | None
     content: str
-    created_by: str
     created_at: str
     kind: str = "profile"
     status: str = "active"
@@ -166,7 +165,6 @@ class MemoryStore:
         person_id: str,
         content: str,
         *,
-        created_by: str,
         group_id: int | None,
         kind: str = "profile",
         status: str = "active",
@@ -202,7 +200,7 @@ class MemoryStore:
             valid_to=expires_at,
             origin="admin_v2",
         )
-        return self._memory_from_claim(claim, created_by=created_by)
+        return self._memory_from_claim(claim)
 
     def list_memories(
         self,
@@ -222,8 +220,7 @@ class MemoryStore:
     def delete_memory(self, memory_id: int) -> bool:
         return self.claim_store.delete_claim(memory_id)
 
-    def prompt_context(self, qq_id: int | str, group_id: int) -> str:
-        del group_id
+    def prompt_context(self, qq_id: int | str) -> str:
         person = self.get_person_by_qq(qq_id)
         if person is None:
             return ""
@@ -242,9 +239,7 @@ class MemoryStore:
         *,
         person_ids: tuple[str, ...] = (),
         limit: int = 6,
-        now: object | None = None,
     ) -> str:
-        del now
         claims = self.claim_store.related_claims(
             group_id,
             person_ids=person_ids,
@@ -360,17 +355,12 @@ class MemoryStore:
         )
 
     @staticmethod
-    def _memory_from_claim(
-        claim: MemoryClaim,
-        *,
-        created_by: str = "claim_store",
-    ) -> MemoryEntry:
+    def _memory_from_claim(claim: MemoryClaim) -> MemoryEntry:
         return MemoryEntry(
             memory_id=claim.claim_id,
             person_id=claim.subject_person_id or "",
             group_id=claim.group_id,
             content=claim.content,
-            created_by=created_by,
             created_at=claim.created_at,
             kind=claim.kind,
             status=claim.status,

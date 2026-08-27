@@ -2,7 +2,7 @@ import nonebot
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
-from qqbot.memory.runtime import memory_store
+from qqbot.memory.runtime import get_memory_store
 from qqbot.runtime.paths import PROJECT_ROOT
 from qqbot.runtime.process import BotAlreadyRunningError, BotProcessGuard
 
@@ -19,10 +19,7 @@ def main() -> None:
         driver = nonebot.get_driver()
         driver.register_adapter(OneBotV11Adapter)
         nonebot.load_from_toml(str(PROJECT_ROOT / "pyproject.toml"))
-        # The plugin loader has already imported the process-wide runtime store.
-        # Read that same instance after all plugins initialize; do not create a
-        # second ClaimStore just for readiness metadata.
-
+        memory_store = get_memory_store()
         runtime_state = guard.mark_ready(
             memory_schema_version=memory_store.claim_store.schema_version()
         )

@@ -26,7 +26,7 @@ class _ApplicationResult:
 
 
 class MemoryExtractor:
-    """Turn unprocessed human chat messages into authoritative V2 claims."""
+    """Turn unprocessed human chat messages into authoritative claims."""
 
     def __init__(
         self,

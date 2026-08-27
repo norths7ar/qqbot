@@ -8,12 +8,12 @@ from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageSegme
 from nonebot.adapters.onebot.v11.event import Reply, Sender
 from pydantic import SecretStr
 
-from qqbot.runtime.audit import AuditLog
 from qqbot.chat.config import Config
 from qqbot.chat.service import ChatService
-from qqbot.storage.group_data import GroupDataStore
 from qqbot.integrations.llm import ConversationStore, Cooldown
 from qqbot.memory import MemoryStore
+from qqbot.runtime.audit import AuditLog
+from qqbot.storage.group_data import GroupDataStore
 
 
 class _FakeClient:
@@ -52,6 +52,8 @@ class ChatServiceInputBoundaryTests(unittest.TestCase):
         self.client = _FakeClient()
         config = Config(
             llm_api_key=SecretStr("test"),
+            llm_base_url="https://example.com/v1",
+            llm_model="test-model",
             allowed_groups=frozenset({1}),
             llm_cooldown_seconds=0,
         )

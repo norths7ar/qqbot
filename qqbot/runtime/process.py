@@ -11,7 +11,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO
 
-
 logger = logging.getLogger(__name__)
 
 

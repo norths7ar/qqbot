@@ -14,14 +14,14 @@ from qqbot.chat.tools import build_chat_tools
 from qqbot.integrations.llm import ChatClient, ConversationStore, Cooldown
 from qqbot.integrations.vision import ImageContentLoader
 from qqbot.integrations.web import TavilyClient
-from qqbot.memory.runtime import memory_store
+from qqbot.memory.runtime import get_memory_store
 from qqbot.runtime.audit import AuditLog
 from qqbot.runtime.paths import PROJECT_ROOT
-from qqbot.storage.runtime import group_data_store
+from qqbot.storage.runtime import get_group_data_store
 
 __plugin_meta__ = PluginMetadata(
     name="群聊 LLM",
-    description="仅在指定群被 @ 时调用 MiMo 回复",
+    description="在指定群被 @ 时调用配置的多模态模型回复",
     usage="@机器人 <问题>",
     type="application",
     homepage=None,
@@ -30,6 +30,8 @@ __plugin_meta__ = PluginMetadata(
 
 
 plugin_config = get_plugin_config(Config)
+memory_store = get_memory_store()
+group_data_store = get_group_data_store()
 claim_store = memory_store.claim_store
 audit_log = AuditLog(
     PROJECT_ROOT / "data" / "logs" / "qqbot-audit.jsonl",
@@ -67,7 +69,7 @@ audit_log.record(
     component="llm_chat",
     llm_model=plugin_config.llm_model,
     web_search_available=tavily.available,
-    memory_v2_schema_version=claim_store.schema_version(),
+    memory_schema_version=claim_store.schema_version(),
 )
 memory_jobs = MemoryJobRunner(
     config=plugin_config,

@@ -26,7 +26,7 @@ class GroupDataStoreTests(unittest.TestCase):
             [message.content for message in messages], ["第一条", "第二条"]
         )
 
-    def test_message_retention_and_clear(self) -> None:
+    def test_message_retention_is_bounded(self) -> None:
         database_path = Path(self.temporary_directory.name) / "bounded.db"
         store = GroupDataStore(database_path, max_messages_per_group=2)
         store.initialize()
@@ -37,8 +37,6 @@ class GroupDataStoreTests(unittest.TestCase):
             [message.content for message in store.recent_messages(1, limit=10)],
             ["消息1", "消息2"],
         )
-        self.assertEqual(store.clear_messages(1), 2)
-        self.assertEqual(store.recent_messages(1, limit=10), [])
 
     def test_messages_by_ids_returns_exact_records(self) -> None:
         first = self.store.record_message(1, 10, "甲", "第一条")

@@ -48,7 +48,6 @@ people:
         entry = store.add_memory(
             person.person_id,
             "喜欢喝无糖可乐",
-            created_by="admin",
             group_id=1,
         )
 
@@ -57,7 +56,7 @@ people:
         self.assertEqual(claim.origin, "admin_v2")
         self.assertIn("喜欢喝无糖可乐", store.search_context(1, "无糖可乐"))
         self.assertNotIn("喜欢喝无糖可乐", store.search_context(2, "无糖可乐"))
-        self.assertNotIn("喜欢喝无糖可乐", store.prompt_context(10001, 1))
+        self.assertNotIn("喜欢喝无糖可乐", store.prompt_context(10001))
 
     def test_rebinding_seeded_identity_reassigns_claims(self) -> None:
         store = self.make_store()
@@ -65,7 +64,6 @@ people:
         store.add_memory(
             generated.person_id,
             "喜欢猫",
-            created_by="admin",
             group_id=1,
         )
         self.people_path.write_text(
@@ -95,7 +93,6 @@ people:
         entry = store.add_memory(
             person.person_id,
             "喜欢猫",
-            created_by="admin",
             group_id=1,
         )
 

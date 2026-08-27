@@ -175,14 +175,6 @@ class GroupDataStore:
             ).fetchall()
         return {int(row["message_id"]): self._message_from_row(row) for row in rows}
 
-    def clear_messages(self, group_id: int) -> int:
-        with self._connect() as connection:
-            cursor = connection.execute(
-                "DELETE FROM group_messages WHERE group_id = ?",
-                (group_id,),
-            )
-        return cursor.rowcount
-
     def unprocessed_human_messages(
         self,
         group_id: int,
@@ -208,42 +200,6 @@ class GroupDataStore:
                 (group_id, after_id, limit),
             ).fetchall()
         return [self._message_from_row(row) for row in rows]
-
-    def human_messages_after(
-        self,
-        group_id: int,
-        after_message_id: int,
-        *,
-        limit: int,
-    ) -> list[GroupMessageRecord]:
-        """Read a consumer-specific batch without sharing the V1 cursor."""
-        if limit < 1:
-            return []
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT message_id, group_id, user_id, person_id, user_name,
-                       content, sent_at, speaker_role
-                FROM group_messages
-                WHERE group_id = ? AND message_id > ? AND speaker_role = 'human'
-                ORDER BY message_id
-                LIMIT ?
-                """,
-                (group_id, max(0, after_message_id), limit),
-            ).fetchall()
-        return [self._message_from_row(row) for row in rows]
-
-    def latest_human_message_id(self, group_id: int) -> int:
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT COALESCE(MAX(message_id), 0) AS message_id
-                FROM group_messages
-                WHERE group_id = ? AND speaker_role = 'human'
-                """,
-                (group_id,),
-            ).fetchone()
-        return int(row["message_id"]) if row else 0
 
     def mark_memory_processed(self, group_id: int, message_id: int) -> None:
         now = datetime.now(UTC).isoformat(timespec="seconds")

@@ -19,115 +19,88 @@ from qqbot.runtime.audit import AuditLog
 from qqbot.storage.group_data import GroupDataStore
 
 
-@dataclass(frozen=True, slots=True)
-class ToolSpec:
-    name: str
-    definition: dict[str, object]
-
-
 def build_chat_tools() -> list[dict[str, object]]:
-    specs = (
-        ToolSpec(
-            name="web_search",
-            definition={
-                "type": "function",
-                "function": {
-                    "name": "web_search",
-                    "description": "查询实时、近期或模型不知道的互联网信息。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"query": {"type": "string"}},
-                        "required": ["query"],
-                    },
+    return [
+        _tool_definition(
+            "web_search",
+            "查询实时、近期或模型不知道的互联网信息。",
+            properties={"query": {"type": "string"}},
+            required=("query",),
+        ),
+        _tool_definition(
+            "recall_memory",
+            (
+                "按需查询当前群的长期人物资料、群聊事件和群梗。"
+                "当回答依赖过去发生的事、某人的偏好或关系时调用；"
+                "不要仅凭BOT历史回复猜测。"
+            ),
+            properties={
+                "query": {"type": "string"},
+                "person": {
+                    "type": "string",
+                    "description": "可选的单个人名或称呼。",
+                },
+            },
+            required=("query",),
+        ),
+        _tool_definition(
+            "lookup_group_member",
+            (
+                "按一个疑似群友称呼查询当前群身份。仅当上下文表明某个词可能指人，"
+                "且身份会影响回答时调用；普通词义不调用。可查询统一名称、别名、"
+                "当前群名片和QQ昵称。"
+            ),
+            properties={
+                "query": {
+                    "type": "string",
+                    "description": "需要核实的单个人名或称呼，不要传整句话",
+                },
+            },
+            required=("query",),
+        ),
+        _tool_definition(
+            "get_group_members",
+            (
+                "读取当前QQ群的实时成员名单和角色，并按照管理员配置的身份映射，"
+                "合并属于同一真人的多个QQ账号。仅用于盘点全群成员；"
+                "查询单个疑似称呼时使用群友称呼查询工具。"
+            ),
+        ),
+        _tool_definition(
+            "get_recent_group_chat",
+            "读取当前群最近聊天，用于用户明确要求总结群聊时。",
+            properties={
+                "limit": {
+                    "type": "integer",
+                    "minimum": 10,
+                    "maximum": 200,
                 },
             },
         ),
-        ToolSpec(
-            name="recall_memory",
-            definition={
-                "type": "function",
-                "function": {
-                    "name": "recall_memory",
-                    "description": (
-                        "按需查询当前群的长期人物资料、群聊事件和群梗。"
-                        "当回答依赖过去发生的事、某人的偏好或关系时调用；"
-                        "不要仅凭BOT历史回复猜测。"
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {"type": "string"},
-                            "person": {
-                                "type": "string",
-                                "description": "可选的单个人名或称呼。",
-                            },
-                        },
-                        "required": ["query"],
-                    },
-                },
-            },
-        ),
-        ToolSpec(
-            name="lookup_group_member",
-            definition={
-                "type": "function",
-                "function": {
-                    "name": "lookup_group_member",
-                    "description": (
-                        "按一个疑似群友称呼查询当前群身份。仅当上下文表明某个词可能指人，"
-                        "且身份会影响回答时调用；普通词义不调用。可查询统一名称、别名、"
-                        "当前群名片和QQ昵称。"
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "需要核实的单个人名或称呼，不要传整句话",
-                            }
-                        },
-                        "required": ["query"],
-                    },
-                },
-            },
-        ),
-        ToolSpec(
-            name="get_group_members",
-            definition={
-                "type": "function",
-                "function": {
-                    "name": "get_group_members",
-                    "description": (
-                        "读取当前QQ群的实时成员名单和角色，并按照管理员配置的身份映射，"
-                        "合并属于同一真人的多个QQ账号。仅用于盘点全群成员；"
-                        "查询单个疑似称呼时使用群友称呼查询工具。"
-                    ),
-                    "parameters": {"type": "object", "properties": {}},
-                },
-            },
-        ),
-        ToolSpec(
-            name="get_recent_group_chat",
-            definition={
-                "type": "function",
-                "function": {
-                    "name": "get_recent_group_chat",
-                    "description": "读取当前群最近聊天，用于用户明确要求总结群聊时。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "limit": {
-                                "type": "integer",
-                                "minimum": 10,
-                                "maximum": 200,
-                            }
-                        },
-                    },
-                },
-            },
-        ),
-    )
-    return [spec.definition for spec in specs]
+    ]
+
+
+def _tool_definition(
+    name: str,
+    description: str,
+    *,
+    properties: Mapping[str, object] | None = None,
+    required: tuple[str, ...] = (),
+) -> dict[str, object]:
+    parameters: dict[str, object] = {
+        "type": "object",
+        "properties": dict(properties or {}),
+    }
+    if required:
+        parameters["required"] = list(required)
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": parameters,
+        },
+    }
 
 
 def recent_group_transcript(
@@ -162,72 +135,81 @@ class ToolContext:
 
 
 def build_tool_executor(context: ToolContext) -> ToolExecutor:
-    async def run(name: str, arguments: Mapping[str, object]) -> str:
-        if name == "web_search":
-            return await context.tavily.search(str(arguments.get("query", "")))
-        if name == "get_group_members":
-            raw_members = await context.bot.get_group_member_list(
-                group_id=context.event.group_id
-            )
-            if not isinstance(raw_members, list):
-                return "未能读取当前群成员名单。"
-            members = [item for item in raw_members if isinstance(item, Mapping)]
-            return format_group_roster(
+    async def web_search(arguments: Mapping[str, object]) -> str:
+        return await context.tavily.search(str(arguments.get("query", "")))
+
+    async def group_members(arguments: Mapping[str, object]) -> str:
+        del arguments
+        members = await _group_members(context)
+        if members is None:
+            return "未能读取当前群成员名单。"
+        return format_group_roster(
+            context.memory_store,
+            members,
+            bot_user_id=context.bot.self_id,
+        )
+
+    async def member_lookup(arguments: Mapping[str, object]) -> str:
+        members = await _group_members(context)
+        if members is None:
+            return "未能读取当前群成员名单。"
+        return lookup_group_member(
+            context.memory_store,
+            members,
+            str(arguments.get("query", "")),
+            bot_user_id=context.bot.self_id,
+        )
+
+    async def recall_memory(arguments: Mapping[str, object]) -> str:
+        query = str(arguments.get("query", "")).strip()
+        if not query:
+            return "请提供要回忆的问题。"
+        person_query = str(arguments.get("person", "")).strip()
+        person_ids: tuple[str, ...] = ()
+        if person_query:
+            members = await _group_members(context)
+            if members is None:
+                return "未能读取当前群成员名单，无法确认要查询的人。"
+            person_ids = match_group_member_person_ids(
                 context.memory_store,
                 members,
+                person_query,
                 bot_user_id=context.bot.self_id,
             )
-        if name == "lookup_group_member":
-            raw_members = await context.bot.get_group_member_list(
-                group_id=context.event.group_id
-            )
-            if not isinstance(raw_members, list):
-                return "未能读取当前群成员名单。"
-            members = [item for item in raw_members if isinstance(item, Mapping)]
-            return lookup_group_member(
-                context.memory_store,
-                members,
-                str(arguments.get("query", "")),
-                bot_user_id=context.bot.self_id,
-            )
-        if name == "recall_memory":
-            query = str(arguments.get("query", "")).strip()
-            if not query:
-                return "请提供要回忆的问题。"
-            person_query = str(arguments.get("person", "")).strip()
-            person_ids: tuple[str, ...] = ()
-            if person_query:
-                raw_members = await context.bot.get_group_member_list(
-                    group_id=context.event.group_id
-                )
-                if not isinstance(raw_members, list):
-                    return "未能读取当前群成员名单，无法确认要查询的人。"
-                members = [item for item in raw_members if isinstance(item, Mapping)]
-                person_ids = match_group_member_person_ids(
+            if not person_ids:
+                return lookup_group_member(
                     context.memory_store,
                     members,
                     person_query,
                     bot_user_id=context.bot.self_id,
                 )
-                if not person_ids:
-                    return lookup_group_member(
-                        context.memory_store,
-                        members,
-                        person_query,
-                        bot_user_id=context.bot.self_id,
-                    )
-            return context.memory_store.search_context(
-                context.event.group_id,
-                query,
-                person_ids=person_ids,
-            )
-        if name == "get_recent_group_chat":
-            try:
-                limit = int(arguments.get("limit", 50))
-            except (TypeError, ValueError):
-                limit = 50
-            return context.recent_group_transcript(context.event.group_id, limit)
-        return f"未知工具：{name}"
+        return context.memory_store.search_context(
+            context.event.group_id,
+            query,
+            person_ids=person_ids,
+        )
+
+    async def recent_chat(arguments: Mapping[str, object]) -> str:
+        try:
+            limit = int(arguments.get("limit", 50))
+        except (TypeError, ValueError):
+            limit = 50
+        return context.recent_group_transcript(context.event.group_id, limit)
+
+    handlers = {
+        "web_search": web_search,
+        "recall_memory": recall_memory,
+        "lookup_group_member": member_lookup,
+        "get_group_members": group_members,
+        "get_recent_group_chat": recent_chat,
+    }
+    defined_names = {
+        str(tool["function"]["name"])
+        for tool in build_chat_tools()
+        if isinstance(tool.get("function"), Mapping)
+    }
+    if handlers.keys() != defined_names:
+        raise RuntimeError("chat tool definitions and handlers are out of sync")
 
     async def execute(name: str, arguments: Mapping[str, object]) -> str:
         started = time.perf_counter()
@@ -240,7 +222,8 @@ def build_tool_executor(context: ToolContext) -> ToolExecutor:
             arguments=arguments,
         )
         try:
-            result = await run(name, arguments)
+            handler = handlers.get(name)
+            result = await handler(arguments) if handler else f"未知工具：{name}"
         except Exception as error:
             context.audit_log.record(
                 "tool.failed",
@@ -267,3 +250,12 @@ def build_tool_executor(context: ToolContext) -> ToolExecutor:
         return result
 
     return execute
+
+
+async def _group_members(context: ToolContext) -> list[Mapping[str, object]] | None:
+    raw_members = await context.bot.get_group_member_list(
+        group_id=context.event.group_id
+    )
+    if not isinstance(raw_members, list):
+        return None
+    return [item for item in raw_members if isinstance(item, Mapping)]

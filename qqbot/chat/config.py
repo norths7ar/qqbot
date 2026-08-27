@@ -7,8 +7,8 @@ from qqbot.chat.prompts import DEFAULT_SYSTEM_PROMPT
 
 class Config(BaseModel):
     llm_api_key: SecretStr
-    llm_base_url: str = "https://api.xiaomimimo.com/v1"
-    llm_model: str = "mimo-v2.5"
+    llm_base_url: str = Field(min_length=1)
+    llm_model: str = Field(min_length=1)
     allowed_groups: frozenset[int] = frozenset()
     llm_context_turns: int = Field(default=50, ge=5, le=200)
     llm_assistant_context_turns: int = Field(default=3, ge=0, le=20)

@@ -72,33 +72,6 @@ class TavilyClient:
                 lines.append(f"链接：{url}")
         return "\n".join(lines)[:7000]
 
-    async def extract(self, url: str, *, query: str = "") -> str:
-        if not self.available:
-            return (
-                "正文提取尚未配置。原文链接："
-                f"{url}\n管理员填写 TAVILY_API_KEY 后可生成正文摘要。"
-            )
-        safe_url = _safe_http_url(url)
-        if not safe_url:
-            return "网页链接无效。"
-        payload: dict[str, object] = {
-            "urls": [safe_url],
-            "extract_depth": "basic",
-        }
-        if query:
-            payload.update({"query": query[:300], "chunks_per_source": 5})
-        response = await self._post("/extract", payload)
-        results = response.get("results")
-        if not isinstance(results, list) or not results:
-            return f"正文提取失败，原文链接：{safe_url}"
-        first = results[0]
-        if not isinstance(first, Mapping):
-            return f"正文提取失败，原文链接：{safe_url}"
-        content = _clean_text(first.get("raw_content"))
-        if not content:
-            return f"正文提取失败，原文链接：{safe_url}"
-        return f"原文链接：{safe_url}\n正文摘录：\n{content[:9000]}"
-
     async def _post(self, path: str, payload: Mapping[str, object]) -> dict[str, Any]:
         headers = {
             "Authorization": f"Bearer {self.api_key}",

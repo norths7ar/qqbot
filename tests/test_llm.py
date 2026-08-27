@@ -13,132 +13,53 @@ from qqbot.integrations.llm import (
 class ConversationStoreTests(unittest.TestCase):
     def test_group_history_contains_multiple_speakers(self) -> None:
         store = ConversationStore(max_turns=5)
-        store.append_message(1, 10, "xiaoming", "小明", "甲的问题")
-        store.append_message(1, 11, "xiaohong", "小红", "乙的补充")
+        store.append_message(1, "xiaoming", "小明", "甲的问题")
+        store.append_message(1, "xiaohong", "小红", "乙的补充")
 
         contents = [message.content for message in store.messages(1)]
 
-        self.assertTrue(
-            any("小明" in content and "甲的问题" in content for content in contents)
-        )
-        self.assertTrue(
-            any("小红" in content and "乙的补充" in content for content in contents)
-        )
+        self.assertTrue(any("小明" in item and "甲的问题" in item for item in contents))
+        self.assertTrue(any("小红" in item and "乙的补充" in item for item in contents))
         self.assertEqual(store.messages(2), [])
 
-    def test_only_recent_bot_replies_are_kept(self) -> None:
+    def test_only_configured_number_of_recent_bot_replies_are_kept(self) -> None:
         store = ConversationStore(max_turns=10, max_assistant_turns=1)
-        store.append_turn(1, 10, "xiaoming", "小明", "问题1", "回答1")
-        store.append_turn(1, 11, "xiaohong", "小红", "问题2", "回答2")
+        store.append_message(1, "xiaoming", "小明", "问题1", now=100)
+        store.append_message(1, "bot", "BOT", "回答1", role="assistant", now=100)
+        store.append_message(1, "xiaohong", "小红", "问题2", now=150)
+        store.append_message(1, "bot", "BOT", "回答2", role="assistant", now=150)
 
         contents = [message.content for message in store.messages(1)]
 
         self.assertIn("回答2", contents)
         self.assertNotIn("回答1", contents)
-        self.assertTrue(any("问题1" in content for content in contents))
-        self.assertTrue(any("问题2" in content for content in contents))
+        self.assertTrue(any("问题1" in item for item in contents))
+        self.assertTrue(any("问题2" in item for item in contents))
 
     def test_current_message_can_be_excluded(self) -> None:
         store = ConversationStore(max_turns=5)
-        store.append_message(1, 10, "xiaoming", "小明", "当前问题", message_id="123")
+        store.append_message(1, "xiaoming", "小明", "当前问题", message_id="123")
         self.assertEqual(store.messages(1, exclude_message_id="123"), [])
 
-    def test_current_message_can_be_enriched_with_temporary_observation(self) -> None:
-        store = ConversationStore(max_turns=5)
-        store.append_message(
-            1,
-            10,
-            "xiaoming",
-            "小明",
-            "[图片]这是什么",
-            message_id="123",
-        )
-
-        changed = store.enrich_message(1, "123", "[临时图片观察]一只猫")
-        contents = [message.content for message in store.messages(1)]
-
-        self.assertTrue(changed)
-        self.assertTrue(any("一只猫" in content for content in contents))
-        self.assertFalse(store.enrich_message(1, "missing", "不应写入"))
-
     def test_history_expires_after_idle_timeout(self) -> None:
-        store = ConversationStore(max_turns=2, max_idle_seconds=12 * 60 * 60)
-        store.append_turn(
-            1,
-            10,
-            "xiaoming",
-            "小明",
-            "旧话题",
-            "旧回答",
-            now=100,
-        )
+        store = ConversationStore(max_turns=2, max_idle_seconds=60)
+        store.append_message(1, "xiaoming", "小明", "旧话题", now=100)
 
-        self.assertEqual(
-            store.messages(1, now=100 + 12 * 60 * 60),
-            [],
-        )
-
-    def test_history_survives_date_change_within_idle_timeout(self) -> None:
-        store = ConversationStore(max_turns=2, max_idle_seconds=12 * 60 * 60)
-        store.append_turn(
-            1,
-            10,
-            "xiaoming",
-            "小明",
-            "23点59分的话题",
-            "回答",
-            now=100,
-        )
-
-        contents = [message.content for message in store.messages(1, now=100 + 2 * 60)]
-
-        self.assertTrue(any("23点59分的话题" in content for content in contents))
+        self.assertEqual(store.messages(1, now=160), [])
 
     def test_fresh_group_message_keeps_group_history_alive(self) -> None:
-        store = ConversationStore(max_turns=6, max_idle_seconds=60)
-        store.append_turn(1, 10, "xiaoming", "小明", "旧话题", "回答1", now=100)
-        store.append_turn(1, 11, "xiaohong", "小红", "新话题", "回答2", now=150)
+        store = ConversationStore(max_turns=3, max_idle_seconds=60)
+        store.append_message(1, "xiaoming", "小明", "旧话题", now=100)
+        store.append_message(1, "xiaohong", "小红", "新话题", now=150)
 
         contents = [message.content for message in store.messages(1, now=161)]
-        self.assertTrue(any("旧话题" in content for content in contents))
-        self.assertTrue(any("新话题" in content for content in contents))
 
-    def test_clear_session_removes_only_one_users_turns(self) -> None:
-        store = ConversationStore(max_turns=3)
-        store.append_turn(1, 10, "xiaoming", "小明", "a", "b")
-        store.append_turn(1, 12, "xiaoming", "小明", "e", "f")
-        store.append_turn(1, 11, "xiaohong", "小红", "c", "d")
-
-        self.assertTrue(store.clear_accounts(1, {10, 12}))
-        contents = [message.content for message in store.messages(1)]
-        self.assertFalse(
-            any(
-                content.endswith("：a") or content.endswith("：e")
-                for content in contents
-            )
-        )
-        self.assertTrue(any(content.endswith("：c") for content in contents))
-
-    def test_clear_group_does_not_affect_other_groups(self) -> None:
-        store = ConversationStore(max_turns=2)
-        store.append_turn(1, 10, "xiaoming", "小明", "a", "b")
-        store.append_turn(1, 11, "xiaohong", "小红", "c", "d")
-        store.append_turn(2, 10, "xiaoming", "小明", "e", "f")
-
-        self.assertEqual(store.clear_group(1), 1)
-        self.assertEqual(store.messages(1), [])
-        self.assertEqual(len(store.messages(2)), 2)
-
-    def test_clear_group_counts_one_person_with_multiple_accounts_once(self) -> None:
-        store = ConversationStore(max_turns=2)
-        store.append_turn(1, 10, "xiaoming", "小明", "a", "b")
-        store.append_turn(1, 12, "xiaoming", "小明", "c", "d")
-
-        self.assertEqual(store.clear_group(1), 1)
+        self.assertTrue(any("旧话题" in item for item in contents))
+        self.assertTrue(any("新话题" in item for item in contents))
 
 
 class CooldownTests(unittest.TestCase):
-    def test_retry_after_uses_session_key(self) -> None:
+    def test_retry_after_uses_group_and_user_key(self) -> None:
         cooldown = Cooldown(seconds=3)
         cooldown.mark_request(1, 10, now=10)
 
@@ -176,9 +97,9 @@ class ResponseParsingTests(unittest.TestCase):
         self.assertEqual(calls[0].arguments, {"query": "北京"})
 
 
-class ToolCallingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_executes_tool_and_returns_final_answer(self) -> None:
-        client = ChatClient(
+class ChatClientTests(unittest.IsolatedAsyncioTestCase):
+    def make_client(self) -> ChatClient:
+        return ChatClient(
             api_key="test",
             base_url="https://example.com",
             model="test-model",
@@ -186,6 +107,21 @@ class ToolCallingTests(unittest.IsolatedAsyncioTestCase):
             max_output_tokens=100,
             max_concurrency=1,
         )
+
+    async def test_complete_returns_raw_text_for_non_chat_consumers(self) -> None:
+        client = self.make_client()
+        client._post = AsyncMock(  # type: ignore[method-assign]
+            return_value={"choices": [{"message": {"content": "**raw**"}}]}
+        )
+
+        answer = await client.complete(system_prompt="test", history=[], prompt="test")
+
+        self.assertEqual(answer, "**raw**")
+        payload = client._post.await_args.args[0]
+        self.assertNotIn("thinking", payload)
+
+    async def test_executes_tool_and_returns_final_answer(self) -> None:
+        client = self.make_client()
         client._post = AsyncMock(  # type: ignore[method-assign]
             side_effect=[
                 {
@@ -226,6 +162,7 @@ class ToolCallingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(answer, "北京今天晴。")
         self.assertEqual(executed, [("web_search", {"query": "北京"})])
+        self.assertNotIn("thinking", client._post.await_args_list[0].args[0])
 
 
 if __name__ == "__main__":

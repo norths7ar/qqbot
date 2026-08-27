@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from qqbot.memory.v2 import ClaimStore, MemoryClaim
+from qqbot.runtime.paths import PROJECT_ROOT
 from qqbot.storage.group_data import GroupDataStore
 
 
@@ -14,14 +15,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--database",
         type=Path,
-        default=Path("data/bot_memory.db"),
-        help="memory SQLite path (default: data/bot_memory.db)",
+        default=PROJECT_ROOT / "data" / "bot_memory.db",
+        help="memory SQLite path (default: project data/bot_memory.db)",
     )
     parser.add_argument(
         "--group-database",
         type=Path,
-        default=Path("data/group_tools.db"),
-        help="group message SQLite path (default: data/group_tools.db)",
+        default=PROJECT_ROOT / "data" / "group_tools.db",
+        help="group message SQLite path (default: project data/group_tools.db)",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 

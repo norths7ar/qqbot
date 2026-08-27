@@ -212,15 +212,6 @@ class ClaimStore:
             ).fetchone()
         return int(row[0])
 
-    @staticmethod
-    def _table_names(connection: sqlite3.Connection) -> set[str]:
-        return {
-            str(row["name"])
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
-        }
-
     def add_claim(
         self,
         *,
@@ -507,38 +498,6 @@ class ClaimStore:
                 else None
             ),
         }
-
-    def restore_claim_snapshot(self, snapshot: Mapping[str, object]) -> bool:
-        try:
-            claim_id = int(snapshot["claim_id"])
-            status = str(snapshot["status"])
-            confidence = float(snapshot["confidence"])
-            importance = int(snapshot["importance"])
-            updated_at = str(snapshot["updated_at"])
-            replacement = snapshot.get("superseded_by_claim_id")
-            superseded_by = int(replacement) if replacement is not None else None
-        except (KeyError, TypeError, ValueError):
-            return False
-        if status not in CLAIM_STATUSES:
-            return False
-        with self._connect() as connection:
-            cursor = connection.execute(
-                """
-                UPDATE memory_claims
-                SET status = ?, confidence = ?, importance = ?, updated_at = ?,
-                    superseded_by_claim_id = ?
-                WHERE claim_id = ?
-                """,
-                (
-                    status,
-                    confidence,
-                    importance,
-                    updated_at,
-                    superseded_by,
-                    claim_id,
-                ),
-            )
-        return cursor.rowcount > 0
 
     def related_claims(
         self,

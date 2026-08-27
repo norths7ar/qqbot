@@ -33,6 +33,7 @@ from qqbot.messaging.input import (
     message_from_onebot_api,
     resolve_onebot_message,
 )
+from qqbot.messaging.plain_text import to_qq_plain_text
 from qqbot.runtime.audit import AuditLog
 from qqbot.storage.group_data import GroupDataStore
 
@@ -120,7 +121,6 @@ class ChatService:
             return
         self.conversations.append_message(
             event.group_id,
-            event.user_id,
             person.person_id,
             person.display_name,
             resolved.log_text,
@@ -297,26 +297,24 @@ class ChatService:
 
     def _record_reply(
         self,
-        bot: Bot,
         event: GroupMessageEvent,
         trace_id: str,
         answer: str,
     ) -> ChatReply:
+        safe_answer = to_qq_plain_text(answer)
         self.conversations.append_message(
             event.group_id,
-            int(bot.self_id),
             "bot",
             "BOT",
-            answer,
+            safe_answer,
             role="assistant",
-            response_to_user_id=event.user_id,
         )
         self.audit_log.record(
             "chat.reply_ready",
             trace_id=trace_id,
-            answer=answer,
+            answer=safe_answer,
         )
-        return MessageSegment.reply(event.message_id) + answer
+        return MessageSegment.reply(event.message_id) + safe_answer
 
     def _validate_turn(self, turn: ResolvedChatTurn) -> str | None:
         prompt = turn.message.current_body
@@ -382,10 +380,7 @@ class ChatService:
             event.group_id,
             exclude_message_id=str(event.message_id),
         )
-        memory_context = self.memory_store.prompt_context(
-            event.user_id,
-            event.group_id,
-        )
+        memory_context = self.memory_store.prompt_context(event.user_id)
         system_prompt = self.config.llm_system_prompt
         if memory_context:
             system_prompt = f"{system_prompt}\n\n{memory_context}"
@@ -495,7 +490,7 @@ class ChatService:
                     event.user_id,
                 )
                 return "处理消息时出了点问题，请稍后再试。"
-            return self._record_reply(bot, event, turn.trace_id, answer)
+            return self._record_reply(event, turn.trace_id, answer)
 
     async def handle_chat(self, bot: Bot, event: GroupMessageEvent) -> ChatReply:
         turn = await self._resolve_chat_turn(bot, event)
