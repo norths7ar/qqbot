@@ -12,7 +12,6 @@ def build_menu(*, is_superuser: bool, history_today_enabled: bool = True) -> str
         "菜单",
         "搜索 关键词",
         "我的记忆",
-        "忘记我 确认",
         "",
         "以上功能也可使用 / 前缀，例如：/搜索 关键词。",
         "发送 B 站链接或 BV 号会自动解析。",

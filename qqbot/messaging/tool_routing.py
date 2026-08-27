@@ -15,7 +15,6 @@ FUNCTION_NAMES = {
     "搜索": "search",
     "历史上的今天": "history_today",
     "我的记忆": "my_memories",
-    "忘记我": "forget_me",
 }
 
 

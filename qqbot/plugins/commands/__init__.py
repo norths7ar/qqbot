@@ -38,7 +38,6 @@ COMMAND_ARGUMENT = CommandArg()
 
 menu = on_command("菜单", aliases={"帮助"}, rule=GROUP_RULE, priority=4, block=True)
 my_memories = on_command("我的记忆", rule=GROUP_RULE, priority=4, block=True)
-forget_me = on_command("忘记我", rule=GROUP_RULE, priority=4, block=True)
 remember = on_command("记住", rule=GROUP_RULE, priority=4, block=True)
 view_memories = on_command("查看记忆", rule=GROUP_RULE, priority=4, block=True)
 delete_memory = on_command("删除记忆", rule=GROUP_RULE, priority=4, block=True)
@@ -119,20 +118,6 @@ async def handle_my_memories(event: GroupMessageEvent) -> None:
         group_id=event.group_id,
     )
     await my_memories.finish(_format_memories(person, memories))
-
-
-@forget_me.handle()
-async def handle_forget_me(
-    event: GroupMessageEvent,
-    args: Message = COMMAND_ARGUMENT,
-) -> None:
-    if args.extract_plain_text().strip() != "确认":
-        await forget_me.finish(
-            "这会删除你的全部长期记忆。如需继续，请发送：/忘记我 确认"
-        )
-    person = memory_store.ensure_person_for_account(event.user_id, _sender_name(event))
-    deleted = memory_store.clear_person_memories(person.person_id)
-    await forget_me.finish(f"已删除你的 {deleted} 条长期记忆，身份绑定仍然保留。")
 
 
 @remember.handle()

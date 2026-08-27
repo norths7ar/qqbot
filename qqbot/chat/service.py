@@ -238,15 +238,6 @@ class ChatService:
             return await history_today()
         if call.name == "my_memories":
             return self._format_own_memories(event)
-        if call.name == "forget_me":
-            if call.arguments != "确认":
-                return "这会删除你的全部长期记忆。如需继续，请发送：忘记我 确认"
-            person = self.memory_store.ensure_person_for_account(
-                event.user_id,
-                self._sender_name(event),
-            )
-            deleted = self.memory_store.clear_person_memories(person.person_id)
-            return f"已删除你的 {deleted} 条长期记忆，身份绑定仍然保留。"
         raise ValueError(f"unsupported function: {call.name}")
 
     async def _run_explicit_function(
