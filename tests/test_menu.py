@@ -14,16 +14,17 @@ class MenuTests(unittest.TestCase):
         self.assertNotIn("天气", first)
         self.assertNotIn("运势", first)
         self.assertNotIn("新闻", first)
-        self.assertIn("菜单", first)
+        self.assertNotIn("菜单", first)
+        self.assertNotIn("我的记忆", first)
+        self.assertNotIn("搜索", first)
+        self.assertNotIn("历史上的今天", first)
         self.assertNotIn("管理员命令", first)
 
     def test_superuser_menu_adds_admin_commands(self) -> None:
         menu = build_menu(is_superuser=True)
 
         self.assertIn("管理员命令（仅使用 / 前缀）", menu)
-        self.assertIn("/清空群聊记录 确认", menu)
-
-    def test_history_can_be_hidden(self) -> None:
-        menu = build_menu(is_superuser=False, history_today_enabled=False)
-
-        self.assertNotIn("历史上的今天", menu)
+        self.assertIn("/记住 @群友 内容", menu)
+        self.assertIn("/查看记忆 @群友", menu)
+        self.assertIn("/删除记忆 编号", menu)
+        self.assertNotIn("/清空群聊记录", menu)

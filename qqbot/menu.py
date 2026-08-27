@@ -9,16 +9,8 @@ def build_menu(*, is_superuser: bool, history_today_enabled: bool = True) -> str
         "@我 总结 50",
         "",
         "功能",
-        "菜单",
-        "搜索 关键词",
-        "我的记忆",
-        "",
-        "以上功能也可使用 / 前缀，例如：/搜索 关键词。",
         "发送 B 站链接或 BV 号会自动解析。",
     ]
-    if history_today_enabled:
-        history_position = lines.index("搜索 关键词")
-        lines.insert(history_position, "历史上的今天")
     if is_superuser:
         lines.extend(
             [
@@ -27,7 +19,6 @@ def build_menu(*, is_superuser: bool, history_today_enabled: bool = True) -> str
                 "/记住 @群友 内容",
                 "/查看记忆 @群友",
                 "/删除记忆 编号",
-                "/清空群聊记录 确认  删除持久群聊记录",
             ]
         )
     return "\n".join(lines)

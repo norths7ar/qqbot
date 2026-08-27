@@ -5,39 +5,31 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message
 from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
-from pydantic import BaseModel
 
-from qqbot.memory import MemoryEntry, Person
+from qqbot.chat.config import Config
+from qqbot.memory import Person
 from qqbot.memory.runtime import memory_store
-from qqbot.menu import build_menu
 
 __plugin_meta__ = PluginMetadata(
     name="统一命令",
     description="为群聊功能提供简单、稳定的斜杠命令和记忆管理",
-    usage="/菜单",
+    usage="/记住 @群友 内容",
     type="application",
     homepage=None,
     supported_adapters={"~onebot.v11"},
 )
 
 
-class Config(BaseModel):
-    command_allowed_groups: frozenset[int] = frozenset({482997153})
-    history_today_enabled: bool = False
-
-
 plugin_config = get_plugin_config(Config)
 
 
 async def allowed_group(event: GroupMessageEvent) -> bool:
-    return event.group_id in plugin_config.command_allowed_groups
+    return event.group_id in plugin_config.allowed_groups
 
 
 GROUP_RULE = Rule(allowed_group)
 COMMAND_ARGUMENT = CommandArg()
 
-menu = on_command("菜单", aliases={"帮助"}, rule=GROUP_RULE, priority=4, block=True)
-my_memories = on_command("我的记忆", rule=GROUP_RULE, priority=4, block=True)
 remember = on_command("记住", rule=GROUP_RULE, priority=4, block=True)
 view_memories = on_command("查看记忆", rule=GROUP_RULE, priority=4, block=True)
 delete_memory = on_command("删除记忆", rule=GROUP_RULE, priority=4, block=True)
@@ -45,24 +37,6 @@ delete_memory = on_command("删除记忆", rule=GROUP_RULE, priority=4, block=Tr
 
 def _is_superuser(user_id: int) -> bool:
     return str(user_id) in get_driver().config.superusers
-
-
-def _sender_name(event: GroupMessageEvent) -> str:
-    return event.sender.card or event.sender.nickname or str(event.user_id)
-
-
-def _format_memories(person: Person, memories: list[MemoryEntry]) -> str:
-    lines = [f"{person.display_name}的记忆"]
-    if person.aliases:
-        lines.append(f"别名：{'、'.join(person.aliases)}")
-    if not memories:
-        lines.append("目前没有已保存的长期记忆。")
-        return "\n".join(lines)
-
-    for memory in memories:
-        scope = "通用" if memory.group_id is None else "本群"
-        lines.append(f"{memory.memory_id}. [{scope}] {memory.content}")
-    return "\n".join(lines)
 
 
 def _target_qq(args: Message) -> int | None:
@@ -98,26 +72,6 @@ async def _target_person(
         )
         display_name = str(target_qq)
     return memory_store.ensure_person_for_account(target_qq, str(display_name))
-
-
-@menu.handle()
-async def handle_menu(event: GroupMessageEvent) -> None:
-    await menu.finish(
-        build_menu(
-            is_superuser=_is_superuser(event.user_id),
-            history_today_enabled=plugin_config.history_today_enabled,
-        )
-    )
-
-
-@my_memories.handle()
-async def handle_my_memories(event: GroupMessageEvent) -> None:
-    person = memory_store.ensure_person_for_account(event.user_id, _sender_name(event))
-    memories = memory_store.list_memories(
-        person.person_id,
-        group_id=event.group_id,
-    )
-    await my_memories.finish(_format_memories(person, memories))
 
 
 @remember.handle()

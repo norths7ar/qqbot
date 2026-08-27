@@ -73,13 +73,13 @@ class ChatService:
 
     async def allowed_mention(self, event: GroupMessageEvent) -> bool:
         return (
-            event.group_id in self.config.llm_allowed_groups
+            event.group_id in self.config.allowed_groups
             and event.to_me
             and not is_explicit_command(event.get_plaintext())
         )
 
     async def allowed_group(self, event: GroupMessageEvent) -> bool:
-        return event.group_id in self.config.llm_allowed_groups
+        return event.group_id in self.config.allowed_groups
 
     def _is_superuser(self, user_id: int) -> bool:
         return str(user_id) in get_driver().config.superusers

@@ -52,7 +52,7 @@ class ChatServiceInputBoundaryTests(unittest.TestCase):
         self.client = _FakeClient()
         config = Config(
             llm_api_key=SecretStr("test"),
-            llm_allowed_groups=frozenset({1}),
+            allowed_groups=frozenset({1}),
             llm_cooldown_seconds=0,
         )
         self.service = ChatService(

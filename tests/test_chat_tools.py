@@ -16,6 +16,12 @@ def _tool_names(tools: list[dict[str, object]]) -> set[str]:
 
 
 class ChatToolAssemblyTests(unittest.TestCase):
+    def test_shared_group_and_bilibili_settings_have_safe_defaults(self) -> None:
+        config = self._config(history_today_enabled=False)
+
+        self.assertEqual(config.allowed_groups, frozenset())
+        self.assertFalse(config.bilibili_auto_parse_enabled)
+
     def _config(self, *, history_today_enabled: bool) -> Config:
         return Config(
             llm_api_key=SecretStr("test"),

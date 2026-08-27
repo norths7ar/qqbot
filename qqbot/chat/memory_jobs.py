@@ -53,7 +53,7 @@ class MemoryJobRunner:
     def initialize_shadow_cursors(self) -> None:
         if not self.config.memory_v2_shadow_enabled:
             return
-        for group_id in self.config.llm_allowed_groups:
+        for group_id in self.config.allowed_groups:
             self.claim_store.initialize_shadow_cursor(
                 group_id,
                 self.group_data_store.latest_human_message_id(group_id),
