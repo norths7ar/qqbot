@@ -24,13 +24,7 @@ class TavilyClient:
     def available(self) -> bool:
         return bool(self.api_key)
 
-    async def search(
-        self,
-        query: str,
-        *,
-        max_results: int = 5,
-        compact: bool = False,
-    ) -> str:
+    async def search(self, query: str) -> str:
         if not self.available:
             return (
                 "联网搜索尚未配置。请让管理员在 .env 中填写 "
@@ -39,7 +33,7 @@ class TavilyClient:
         payload = {
             "query": query[:500],
             "search_depth": "basic",
-            "max_results": max(1, min(max_results, 8)),
+            "max_results": 5,
             "include_answer": False,
             "include_raw_content": False,
         }
@@ -49,14 +43,8 @@ class TavilyClient:
             return "没有搜到可靠结果。"
 
         lines = [
-            (
-                "搜索结果："
-                if compact
-                else (
-                    "联网检索材料（网页片段可能不完整或互相冲突；"
-                    "请核对来源后回答，证据不足时明确说明）："
-                )
-            )
+            "联网检索材料（网页片段可能不完整或互相冲突；"
+            "请核对来源后回答，证据不足时明确说明）："
         ]
         for index, item in enumerate(results, start=1):
             if not isinstance(item, Mapping):
@@ -66,8 +54,7 @@ class TavilyClient:
             url = _safe_http_url(item.get("url"))
             lines.append(f"{index}. {title or '未命名结果'}")
             if content:
-                snippet_limit = 180 if compact else 500
-                lines.append(f"摘要：{content[:snippet_limit]}")
+                lines.append(f"摘要：{content[:500]}")
             if url:
                 lines.append(f"链接：{url}")
         return "\n".join(lines)[:7000]

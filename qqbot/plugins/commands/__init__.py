@@ -11,8 +11,8 @@ from qqbot.memory import MemoryEntry, Person
 from qqbot.memory.runtime import get_memory_store
 
 __plugin_meta__ = PluginMetadata(
-    name="统一命令",
-    description="为群聊功能提供简单、稳定的斜杠命令和记忆管理",
+    name="管理员命令",
+    description="提供确定性的长期记忆维护入口",
     usage="/记住 @群友 内容",
     type="application",
     homepage=None,

@@ -22,32 +22,6 @@ class BilibiliReferenceTests(unittest.TestCase):
 
 
 class TavilySearchTests(unittest.IsolatedAsyncioTestCase):
-    async def test_compact_search_formats_results_for_explicit_command(self) -> None:
-        client = TavilyClient("test")
-        client._post = AsyncMock(  # type: ignore[method-assign]
-            return_value={
-                "results": [
-                    {
-                        "title": "逻辑谜题",
-                        "content": "这是一段用于说明谜题答案的网页摘要。",
-                        "url": "https://example.com/puzzle",
-                    }
-                ]
-            }
-        )
-
-        result = await client.search("三颗子弹", compact=True)
-
-        self.assertEqual(
-            result,
-            (
-                "搜索结果：\n"
-                "1. 逻辑谜题\n"
-                "摘要：这是一段用于说明谜题答案的网页摘要。\n"
-                "链接：https://example.com/puzzle"
-            ),
-        )
-
     async def test_search_material_warns_model_about_evidence_quality(self) -> None:
         client = TavilyClient("test")
         client._post = AsyncMock(  # type: ignore[method-assign]
