@@ -3,8 +3,6 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 
 from qqbot.identity import (
@@ -14,26 +12,18 @@ from qqbot.identity import (
     match_group_member_person_ids,
 )
 from qqbot.integrations.llm import ToolExecutor
-from qqbot.integrations.web import TavilyClient, history_today
+from qqbot.integrations.web import TavilyClient
 from qqbot.memory import MemoryStore
 from qqbot.runtime.audit import AuditLog
 from qqbot.storage.group_data import GroupDataStore
-
-if TYPE_CHECKING:
-    from qqbot.chat.config import Config
-
 
 @dataclass(frozen=True, slots=True)
 class ToolSpec:
     name: str
     definition: dict[str, object]
-    enabled: bool = True
-    direct_result: bool = False
 
 
-def build_chat_tools(
-    config: Config,
-) -> tuple[list[dict[str, object]], frozenset[str]]:
+def build_chat_tools() -> list[dict[str, object]]:
     specs = (
         ToolSpec(
             name="web_search",
@@ -134,25 +124,8 @@ def build_chat_tools(
                 },
             },
         ),
-        ToolSpec(
-            name="get_history_today",
-            definition={
-                "type": "function",
-                "function": {
-                    "name": "get_history_today",
-                    "description": "查询今天在历史上发生的事件。",
-                    "parameters": {"type": "object", "properties": {}},
-                },
-            },
-            enabled=config.history_today_enabled,
-            direct_result=True,
-        ),
     )
-    enabled_specs = tuple(spec for spec in specs if spec.enabled)
-    return (
-        [spec.definition for spec in enabled_specs],
-        frozenset(spec.name for spec in enabled_specs if spec.direct_result),
-    )
+    return [spec.definition for spec in specs]
 
 
 def recent_group_transcript(
@@ -180,7 +153,6 @@ class ToolContext:
     bot: Bot
     event: GroupMessageEvent
     trace_id: str
-    config: Config
     audit_log: AuditLog
     tavily: TavilyClient
     memory_store: MemoryStore
@@ -191,10 +163,6 @@ def build_tool_executor(context: ToolContext) -> ToolExecutor:
     async def run(name: str, arguments: Mapping[str, object]) -> str:
         if name == "web_search":
             return await context.tavily.search(str(arguments.get("query", "")))
-        if name == "get_history_today":
-            if not context.config.history_today_enabled:
-                return "历史上的今天当前未启用。"
-            return await history_today()
         if name == "get_group_members":
             raw_members = await context.bot.get_group_member_list(
                 group_id=context.event.group_id

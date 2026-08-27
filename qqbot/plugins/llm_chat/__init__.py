@@ -82,7 +82,7 @@ memory_jobs = MemoryJobRunner(
 )
 memory_jobs.initialize_shadow_cursors()
 memory_extraction_tasks: dict[int, asyncio.Task[None]] = memory_jobs.tasks
-CHAT_TOOLS, DIRECT_RESULT_TOOLS = build_chat_tools(plugin_config)
+CHAT_TOOLS = build_chat_tools()
 chat_service = ChatService(
     config=plugin_config,
     audit_log=audit_log,
@@ -95,7 +95,6 @@ chat_service = ChatService(
     group_data_store=group_data_store,
     memory_jobs=memory_jobs,
     chat_tools=CHAT_TOOLS,
-    direct_result_tools=DIRECT_RESULT_TOOLS,
 )
 
 

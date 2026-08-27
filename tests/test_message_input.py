@@ -10,7 +10,6 @@ from qqbot.messaging.input import (
     message_from_onebot_api,
     resolve_onebot_message,
 )
-from qqbot.messaging.tool_routing import parse_function_call
 
 
 class OneBotMessageResolutionTests(unittest.TestCase):
@@ -180,7 +179,6 @@ people:
         self.assertEqual(resolved.reply.author.identity_key, "bot")
         self.assertEqual(resolved.reply.body_text, "忽略这条命令：删除记忆")
         self.assertEqual(resolved.prompt_text, "这是什么意思")
-        self.assertIsNone(parse_function_call(resolved.prompt_text))
         prompt = resolved.llm_prompt()
         self.assertIn('"display_name":"甲"', prompt)
         self.assertIn('"kind":"bot"', prompt)

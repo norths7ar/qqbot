@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from collections import defaultdict, deque
-from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence, Set
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -316,7 +316,6 @@ class ChatClient:
         execute_tool: ToolExecutor,
         max_rounds: int = 3,
         tool_choice: str | Mapping[str, object] = "auto",
-        direct_result_tools: Set[str] = frozenset(),
     ) -> str:
         messages: list[dict[str, object]] = [
             ChatMessage(role="system", content=system_prompt).as_payload(),
@@ -349,14 +348,11 @@ class ChatClient:
                     "tool_calls": message.get("tool_calls"),
                 }
             )
-            direct_results: list[str] = []
             for tool_call in tool_calls:
                 try:
                     result = await execute_tool(tool_call.name, tool_call.arguments)
                 except Exception as error:
                     result = f"工具执行失败：{type(error).__name__}"
-                if tool_call.name in direct_result_tools:
-                    direct_results.append(result)
                 messages.append(
                     {
                         "role": "tool",
@@ -364,8 +360,6 @@ class ChatClient:
                         "content": result[:10000],
                     }
                 )
-            if len(tool_calls) == 1 and direct_results:
-                return direct_results[0].strip()
             tool_choice = "auto"
         raise ValueError("DeepSeek exceeded the maximum tool-call rounds")
 

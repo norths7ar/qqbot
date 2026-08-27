@@ -227,52 +227,5 @@ class ToolCallingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer, "北京今天晴。")
         self.assertEqual(executed, [("web_search", {"query": "北京"})])
 
-    async def test_returns_factual_tool_result_without_second_model_pass(self) -> None:
-        client = ChatClient(
-            api_key="test",
-            base_url="https://example.com",
-            model="test-model",
-            timeout_seconds=5,
-            max_output_tokens=100,
-            max_concurrency=1,
-        )
-        client._post = AsyncMock(  # type: ignore[method-assign]
-            return_value={
-                "choices": [
-                    {
-                        "message": {
-                            "content": None,
-                            "tool_calls": [
-                                {
-                                    "id": "call_1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "get_history_today",
-                                        "arguments": "{}",
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ]
-            }
-        )
-
-        async def execute(name: str, arguments: object) -> str:
-            return "1954年：意大利登山队首次登顶乔戈里峰。"
-
-        answer = await client.complete_with_tools(
-            system_prompt="test",
-            history=[],
-            prompt="历史上的今天",
-            tools=[],
-            execute_tool=execute,  # type: ignore[arg-type]
-            direct_result_tools={"get_history_today"},
-        )
-
-        self.assertEqual(answer, "1954年：意大利登山队首次登顶乔戈里峰。")
-        client._post.assert_awaited_once()
-
-
 if __name__ == "__main__":
     unittest.main()
