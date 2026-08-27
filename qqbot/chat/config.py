@@ -31,9 +31,6 @@ class Config(BaseModel):
     memory_auto_extract_enabled: bool = True
     memory_extract_batch_size: int = Field(default=20, ge=5, le=100)
     memory_episode_ttl_hours: float = Field(default=72, ge=1, le=720)
-    memory_v2_shadow_enabled: bool = False
-    memory_v2_shadow_batch_size: int = Field(default=20, ge=5, le=100)
-    memory_v2_shadow_backfill_existing: bool = False
     audit_log_enabled: bool = True
     audit_log_max_bytes: int = Field(
         default=5 * 1024 * 1024,

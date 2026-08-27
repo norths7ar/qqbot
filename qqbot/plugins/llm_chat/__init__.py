@@ -15,7 +15,6 @@ from qqbot.integrations.llm import ChatClient, ConversationStore, Cooldown
 from qqbot.integrations.vision import ImageContentLoader
 from qqbot.integrations.web import TavilyClient
 from qqbot.memory.runtime import memory_store
-from qqbot.memory.v2_runtime import claim_store
 from qqbot.runtime.audit import AuditLog
 from qqbot.runtime.paths import PROJECT_ROOT
 from qqbot.storage.runtime import group_data_store
@@ -31,6 +30,7 @@ __plugin_meta__ = PluginMetadata(
 
 
 plugin_config = get_plugin_config(Config)
+claim_store = memory_store.claim_store
 audit_log = AuditLog(
     PROJECT_ROOT / "data" / "logs" / "qqbot-audit.jsonl",
     enabled=plugin_config.audit_log_enabled,
@@ -68,19 +68,14 @@ audit_log.record(
     llm_model=plugin_config.llm_model,
     web_search_available=tavily.available,
     memory_v2_schema_version=claim_store.schema_version(),
-    memory_v2_shadow_enabled=plugin_config.memory_v2_shadow_enabled,
-    memory_v2_shadow_batch_size=plugin_config.memory_v2_shadow_batch_size,
-    memory_v2_shadow_backfill_existing=plugin_config.memory_v2_shadow_backfill_existing,
 )
 memory_jobs = MemoryJobRunner(
     config=plugin_config,
     audit_log=audit_log,
     client=client,
-    memory_store=memory_store,
     claim_store=claim_store,
     group_data_store=group_data_store,
 )
-memory_jobs.initialize_shadow_cursors()
 memory_extraction_tasks: dict[int, asyncio.Task[None]] = memory_jobs.tasks
 CHAT_TOOLS = build_chat_tools()
 chat_service = ChatService(

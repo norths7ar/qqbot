@@ -7,7 +7,7 @@ from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
 
 from qqbot.chat.config import Config
-from qqbot.memory import Person
+from qqbot.memory import MemoryEntry, Person
 from qqbot.memory.runtime import memory_store
 
 __plugin_meta__ = PluginMetadata(
@@ -47,6 +47,17 @@ def _target_qq(args: Message) -> int | None:
         if qq.isdigit():
             return int(qq)
     return None
+
+
+def _format_memories(person: Person, memories: list[MemoryEntry]) -> str:
+    lines = [f"{person.display_name}的记忆"]
+    if not memories:
+        lines.append("目前没有已保存的长期记忆。")
+        return "\n".join(lines)
+    for memory in memories:
+        scope = "通用" if memory.group_id is None else "本群"
+        lines.append(f"{memory.memory_id}. [{scope}] {memory.content}")
+    return "\n".join(lines)
 
 
 async def _target_person(

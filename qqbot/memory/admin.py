@@ -5,12 +5,12 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from qqbot.storage.group_data import GroupDataStore
 from qqbot.memory.v2 import ClaimStore, MemoryClaim
+from qqbot.storage.group_data import GroupDataStore
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Inspect and review qqbot V2 memory")
+    parser = argparse.ArgumentParser(description="Inspect and review qqbot memory")
     parser.add_argument(
         "--database",
         type=Path,
@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
-    recent = commands.add_parser("recent", help="list recent V2 claims")
+    recent = commands.add_parser("recent", help="list recent claims")
     recent.add_argument("--limit", type=int, default=20)
     recent.add_argument("--group", type=int)
 
@@ -47,10 +47,10 @@ def build_parser() -> argparse.ArgumentParser:
     conflicts = commands.add_parser("conflicts", help="list possible conflicts")
     conflicts.add_argument("--limit", type=int, default=50)
 
-    batches = commands.add_parser("batches", help="list shadow extraction batches")
+    batches = commands.add_parser("batches", help="list extraction batches")
     batches.add_argument("--limit", type=int, default=20)
 
-    commands.add_parser("status", help="show V2 schema and record counts")
+    commands.add_parser("status", help="show memory schema and record counts")
     return parser
 
 
@@ -62,10 +62,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.command == "status":
         claims = store.list_claims(limit=1000)
         candidates = sum(claim.status == "candidate" for claim in claims)
-        shadow = sum(claim.origin == "shadow_v2" for claim in claims)
+        serving = sum(
+            claim.origin in {"legacy_v1", "online_v2", "admin_v2"} for claim in claims
+        )
         print(f"schema_version={store.schema_version()}")
-        print(f"claims={len(claims)} candidates={candidates} shadow={shadow}")
-        print(f"shadow_batches={len(store.list_shadow_batches(limit=200))}")
+        print(f"claims={len(claims)} serving={serving} candidates={candidates}")
+        print(f"extraction_batches={len(store.list_extraction_batches(limit=200))}")
         return 0
     if arguments.command == "recent":
         _print_claims(
@@ -85,7 +87,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print_claims(store.conflicts(limit=arguments.limit))
         return 0
     if arguments.command == "batches":
-        for batch in store.list_shadow_batches(limit=arguments.limit):
+        for batch in store.list_extraction_batches(limit=arguments.limit):
             error = f" error={batch.error}" if batch.error else ""
             rejected = (
                 f" rejected={'; '.join(batch.rejection_reasons)}"

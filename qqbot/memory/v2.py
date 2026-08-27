@@ -10,7 +10,7 @@ from pathlib import Path
 
 from qqbot.storage.sqlite import ensure_column
 
-MEMORY_V2_SCHEMA_VERSION = 2
+MEMORY_V2_SCHEMA_VERSION = 3
 CLAIM_SCOPES = frozenset({"person", "group"})
 CLAIM_KINDS = frozenset({"profile", "preference", "relationship", "episode", "lore"})
 CLAIM_STATUSES = frozenset(
@@ -30,103 +30,15 @@ CLAIM_OPERATIONS = frozenset(
     {"insert", "confirm", "update", "dispute", "supersede", "ignore"}
 )
 
-_V1_MIRROR_TRIGGERS = """
-CREATE TRIGGER IF NOT EXISTS trg_v1_person_memory_insert
-AFTER INSERT ON memories
-BEGIN
-    INSERT OR IGNORE INTO memory_claims(
-        scope, group_id, subject_person_id, predicate, object_text,
-        asserted_by_person_id, kind, status, source_type, confidence,
-        importance, valid_from, valid_to, observed_at, created_at,
-        updated_at, origin, legacy_scope, legacy_memory_id
-    ) VALUES (
-        'person', NEW.group_id, NEW.person_id, 'legacy_person_memory',
-        NEW.content, NULL, NEW.kind, NEW.status, NEW.source_type,
-        CASE WHEN NEW.source_type = 'admin_config' THEN 1.0
-             WHEN NEW.source_type = 'self_statement' THEN 0.9
-             ELSE 0.5 END,
-        3, NULL, NEW.expires_at, NEW.created_at, NEW.created_at,
-        COALESCE(NEW.updated_at, NEW.created_at), 'legacy_v1',
-        'person', NEW.memory_id
-    );
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_v1_person_memory_update
-AFTER UPDATE ON memories
-BEGIN
-    UPDATE memory_claims
-    SET group_id = NEW.group_id,
-        subject_person_id = NEW.person_id,
-        object_text = NEW.content,
-        kind = NEW.kind,
-        status = NEW.status,
-        valid_to = NEW.expires_at,
-        updated_at = COALESCE(NEW.updated_at, NEW.created_at)
-    WHERE legacy_scope = 'person'
-      AND legacy_memory_id = NEW.memory_id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_v1_person_memory_delete
-AFTER DELETE ON memories
-BEGIN
-    DELETE FROM memory_claims
-    WHERE legacy_scope = 'person'
-      AND legacy_memory_id = OLD.memory_id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_v1_group_memory_insert
-AFTER INSERT ON group_memories
-BEGIN
-    INSERT OR IGNORE INTO memory_claims(
-        scope, group_id, subject_person_id, predicate, object_text,
-        asserted_by_person_id, kind, status, source_type, confidence,
-        importance, valid_from, valid_to, observed_at, created_at,
-        updated_at, origin, legacy_scope, legacy_memory_id
-    ) VALUES (
-        'group', NEW.group_id, NULL, 'legacy_group_memory', NEW.content,
-        NULL, NEW.kind, NEW.status, NEW.source_type, 0.7, NEW.importance,
-        NULL, NEW.expires_at, NEW.created_at, NEW.created_at,
-        NEW.updated_at, 'legacy_v1', 'group', NEW.memory_id
-    );
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_v1_group_memory_update
-AFTER UPDATE ON group_memories
-BEGIN
-    UPDATE memory_claims
-    SET group_id = NEW.group_id,
-        object_text = NEW.content,
-        kind = NEW.kind,
-        status = NEW.status,
-        importance = NEW.importance,
-        valid_to = NEW.expires_at,
-        updated_at = NEW.updated_at
-    WHERE legacy_scope = 'group'
-      AND legacy_memory_id = NEW.memory_id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_v1_group_memory_delete
-AFTER DELETE ON group_memories
-BEGIN
-    DELETE FROM memory_claims
-    WHERE legacy_scope = 'group'
-      AND legacy_memory_id = OLD.memory_id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_v1_memory_evidence_insert
-AFTER INSERT ON memory_evidence
-BEGIN
-    INSERT OR IGNORE INTO memory_claim_evidence(
-        claim_id, group_message_id, asserted_by_person_id,
-        evidence_type, created_at
-    )
-    SELECT claim_id, NEW.group_message_id, NEW.asserted_by_person_id,
-           NEW.evidence_type, NEW.created_at
-    FROM memory_claims
-    WHERE legacy_scope = NEW.memory_scope
-      AND legacy_memory_id = NEW.memory_id;
-END;
-"""
+_V1_MIRROR_TRIGGER_NAMES = (
+    "trg_v1_person_memory_insert",
+    "trg_v1_person_memory_update",
+    "trg_v1_person_memory_delete",
+    "trg_v1_group_memory_insert",
+    "trg_v1_group_memory_update",
+    "trg_v1_group_memory_delete",
+    "trg_v1_memory_evidence_insert",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,11 +64,11 @@ class MemoryClaim:
     origin: str
     legacy_scope: str | None
     legacy_memory_id: int | None
-    shadow_batch_id: int | None
+    extraction_batch_id: int | None
 
     @property
     def content(self) -> str:
-        if self.predicate.startswith("legacy_"):
+        if self.predicate.startswith("legacy_") or self.predicate == "admin_memory":
             return self.object_text
         return f"{self.predicate}：{self.object_text}"
 
@@ -170,7 +82,7 @@ class ClaimEvidence:
 
 
 @dataclass(frozen=True, slots=True)
-class ShadowBatch:
+class ExtractionBatch:
     batch_id: int
     group_id: int
     first_message_id: int
@@ -186,7 +98,7 @@ class ShadowBatch:
 
 
 class ClaimStore:
-    """V2 claim storage kept independent from the V1 serving tables."""
+    """Authoritative long-term memory claim storage."""
 
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
@@ -224,7 +136,7 @@ class ClaimStore:
                     origin TEXT NOT NULL,
                     legacy_scope TEXT,
                     legacy_memory_id INTEGER,
-                    shadow_batch_id INTEGER,
+                    extraction_batch_id INTEGER,
                     CHECK(scope IN ('person', 'group')),
                     CHECK(status IN (
                         'candidate', 'active', 'disputed', 'superseded', 'rejected'
@@ -250,7 +162,7 @@ class ClaimStore:
                     UNIQUE(claim_id, group_message_id, evidence_type)
                 );
 
-                CREATE TABLE IF NOT EXISTS memory_shadow_batches (
+                CREATE TABLE IF NOT EXISTS memory_extraction_batches (
                     batch_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     group_id INTEGER NOT NULL,
                     first_message_id INTEGER NOT NULL,
@@ -267,21 +179,19 @@ class ClaimStore:
                 );
                 """
             )
+            ensure_column(connection, "memory_claims", "extraction_batch_id", "INTEGER")
             ensure_column(
-                connection,
-                "memory_claim_evidence",
-                "shadow_batch_id",
-                "INTEGER",
+                connection, "memory_claim_evidence", "extraction_batch_id", "INTEGER"
             )
-            ensure_column(
-                connection,
-                "memory_shadow_batches",
-                "rejection_reasons",
-                "TEXT NOT NULL DEFAULT ''",
+            current_version = int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(version), 0) FROM memory_schema_migrations"
+                ).fetchone()[0]
             )
-            tables = self._table_names(connection)
-            if {"memories", "group_memories", "memory_evidence"} <= tables:
-                connection.executescript(_V1_MIRROR_TRIGGERS)
+            if current_version < MEMORY_V2_SCHEMA_VERSION:
+                self._migrate_v1_rows(connection)
+            for trigger_name in _V1_MIRROR_TRIGGER_NAMES:
+                connection.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
             connection.execute(
                 """
                 INSERT OR IGNORE INTO memory_schema_migrations(
@@ -290,11 +200,10 @@ class ClaimStore:
                 """,
                 (
                     MEMORY_V2_SCHEMA_VERSION,
-                    "record shadow extraction rejection reasons",
+                    "make claims the authoritative memory store",
                     _now(),
                 ),
             )
-            self._migrate_v1_rows(connection)
 
     def schema_version(self) -> int:
         with self._connect() as connection:
@@ -329,8 +238,8 @@ class ClaimStore:
         valid_from: str | None = None,
         valid_to: str | None = None,
         observed_at: str | None = None,
-        origin: str = "shadow_v2",
-        shadow_batch_id: int | None = None,
+        origin: str = "online_v2",
+        extraction_batch_id: int | None = None,
     ) -> MemoryClaim:
         self._validate_claim(
             scope=scope,
@@ -349,7 +258,7 @@ class ClaimStore:
                     scope, group_id, subject_person_id, predicate, object_text,
                     asserted_by_person_id, kind, status, source_type, confidence,
                     importance, valid_from, valid_to, observed_at, created_at,
-                    updated_at, origin, shadow_batch_id
+                    updated_at, origin, extraction_batch_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -370,7 +279,7 @@ class ClaimStore:
                     timestamp,
                     timestamp,
                     origin,
-                    shadow_batch_id,
+                    extraction_batch_id,
                 ),
             )
             claim_id = cursor.lastrowid
@@ -446,7 +355,7 @@ class ClaimStore:
         *,
         asserted_by_person_id: str | None,
         evidence_type: str,
-        shadow_batch_id: int | None = None,
+        extraction_batch_id: int | None = None,
     ) -> bool:
         with self._connect() as connection:
             if self._claim_row(connection, claim_id) is None:
@@ -455,7 +364,7 @@ class ClaimStore:
                 """
                 INSERT OR IGNORE INTO memory_claim_evidence(
                     claim_id, group_message_id, asserted_by_person_id,
-                    evidence_type, created_at, shadow_batch_id
+                    evidence_type, created_at, extraction_batch_id
                 ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -464,10 +373,52 @@ class ClaimStore:
                     asserted_by_person_id,
                     _normalize_text(evidence_type, limit=40),
                     _now(),
-                    shadow_batch_id,
+                    extraction_batch_id,
                 ),
             )
         return cursor.rowcount > 0
+
+    def delete_claim(self, claim_id: int) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM memory_claims WHERE claim_id = ?",
+                (claim_id,),
+            )
+        return cursor.rowcount > 0
+
+    def list_serving_claims(
+        self,
+        *,
+        subject_person_id: str | None = None,
+        group_id: int | None = None,
+        include_global: bool = True,
+        limit: int = 100,
+        now: datetime | None = None,
+    ) -> list[MemoryClaim]:
+        current = (now or datetime.now(UTC)).isoformat(timespec="seconds")
+        clauses = [
+            "origin IN ('legacy_v1', 'online_v2', 'admin_v2')",
+            "status IN ('active', 'candidate', 'disputed')",
+            "(valid_to IS NULL OR valid_to > ?)",
+        ]
+        parameters: list[object] = [current]
+        if subject_person_id is not None:
+            clauses.append("subject_person_id = ?")
+            parameters.append(subject_person_id)
+        if group_id is not None:
+            if include_global:
+                clauses.append("(group_id = ? OR group_id IS NULL)")
+            else:
+                clauses.append("group_id = ?")
+            parameters.append(group_id)
+        parameters.append(max(1, min(limit, 1000)))
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM memory_claims WHERE {' AND '.join(clauses)} "
+                "ORDER BY claim_id LIMIT ?",  # noqa: S608
+                parameters,
+            ).fetchall()
+        return [self._claim_from_row(row) for row in rows]
 
     def update_claim_status(
         self,
@@ -598,6 +549,7 @@ class ClaimStore:
         limit: int = 30,
     ) -> list[MemoryClaim]:
         normalized_people = tuple(dict.fromkeys(person_ids))
+        current = _now()
         with self._connect() as connection:
             if normalized_people:
                 placeholders = ",".join("?" for _ in normalized_people)
@@ -605,23 +557,27 @@ class ClaimStore:
                     f"""
                     SELECT * FROM memory_claims
                     WHERE (group_id = ? OR group_id IS NULL)
+                      AND origin IN ('legacy_v1', 'online_v2', 'admin_v2')
                       AND status IN ('active', 'candidate', 'disputed')
+                      AND (valid_to IS NULL OR valid_to > ?)
                       AND (subject_person_id IN ({placeholders}) OR scope = 'group')
                     ORDER BY updated_at DESC
                     LIMIT 200
                     """,  # noqa: S608
-                    (group_id, *normalized_people),
+                    (group_id, current, *normalized_people),
                 ).fetchall()
             else:
                 rows = connection.execute(
                     """
                     SELECT * FROM memory_claims
                     WHERE (group_id = ? OR group_id IS NULL)
+                      AND origin IN ('legacy_v1', 'online_v2', 'admin_v2')
                       AND status IN ('active', 'candidate', 'disputed')
+                      AND (valid_to IS NULL OR valid_to > ?)
                     ORDER BY updated_at DESC
                     LIMIT 200
                     """,
-                    (group_id,),
+                    (group_id, current),
                 ).fetchall()
         terms = _terms(query_text)
         ranked: list[tuple[int, MemoryClaim]] = []
@@ -636,14 +592,14 @@ class ClaimStore:
         ranked.sort(key=lambda item: (item[0], item[1].claim_id), reverse=True)
         return [claim for _, claim in ranked[: max(1, min(limit, 100))]]
 
-    def start_shadow_batch(
+    def start_extraction_batch(
         self, group_id: int, first_message_id: int, last_message_id: int
     ) -> int:
         timestamp = _now()
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO memory_shadow_batches(
+                INSERT INTO memory_extraction_batches(
                     group_id, first_message_id, last_message_id, status, created_at
                 ) VALUES (?, ?, ?, 'running', ?)
                 ON CONFLICT(group_id, first_message_id, last_message_id)
@@ -656,21 +612,21 @@ class ClaimStore:
             )
             row = connection.execute(
                 """
-                SELECT batch_id FROM memory_shadow_batches
+                SELECT batch_id FROM memory_extraction_batches
                 WHERE group_id = ? AND first_message_id = ? AND last_message_id = ?
                 """,
                 (group_id, first_message_id, last_message_id),
             ).fetchone()
             if row is not None:
                 connection.execute(
-                    "DELETE FROM memory_claims WHERE shadow_batch_id = ?",
+                    "DELETE FROM memory_claims WHERE extraction_batch_id = ?",
                     (int(row["batch_id"]),),
                 )
         if row is None:
-            raise RuntimeError("failed to start shadow batch")
+            raise RuntimeError("failed to start extraction batch")
         return int(row["batch_id"])
 
-    def finish_shadow_batch(
+    def finish_extraction_batch(
         self,
         batch_id: int,
         *,
@@ -683,15 +639,15 @@ class ClaimStore:
         restore_snapshots: Sequence[Mapping[str, object]] = (),
     ) -> None:
         if status not in {"completed", "failed"}:
-            raise ValueError("shadow batch status must be completed or failed")
+            raise ValueError("extraction batch status must be completed or failed")
         with self._connect() as connection:
             if status == "failed":
                 connection.execute(
-                    "DELETE FROM memory_claim_evidence WHERE shadow_batch_id = ?",
+                    "DELETE FROM memory_claim_evidence WHERE extraction_batch_id = ?",
                     (batch_id,),
                 )
                 connection.execute(
-                    "DELETE FROM memory_claims WHERE shadow_batch_id = ?",
+                    "DELETE FROM memory_claims WHERE extraction_batch_id = ?",
                     (batch_id,),
                 )
                 for snapshot in restore_snapshots:
@@ -725,7 +681,7 @@ class ClaimStore:
                     )
             connection.execute(
                 """
-                UPDATE memory_shadow_batches
+                UPDATE memory_extraction_batches
                 SET status = ?, operation_count = ?, applied_count = ?,
                     rejection_reasons = ?, raw_response = ?, error = ?,
                     completed_at = ?
@@ -747,47 +703,11 @@ class ClaimStore:
                 ),
             )
 
-    def shadow_cursor(self, group_id: int) -> int | None:
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT MAX(last_message_id) AS cursor
-                FROM memory_shadow_batches
-                WHERE group_id = ? AND status = 'completed'
-                """,
-                (group_id,),
-            ).fetchone()
-        return int(row["cursor"]) if row and row["cursor"] is not None else None
-
-    def initialize_shadow_cursor(self, group_id: int, message_id: int) -> bool:
-        """Anchor first-time shadow extraction without replaying old chat history."""
-        if self.shadow_cursor(group_id) is not None:
-            return False
-        timestamp = _now()
-        with self._connect() as connection:
-            cursor = connection.execute(
-                """
-                INSERT OR IGNORE INTO memory_shadow_batches(
-                    group_id, first_message_id, last_message_id, status,
-                    operation_count, applied_count, raw_response, created_at,
-                    completed_at
-                ) VALUES (?, ?, ?, 'completed', 0, 0, '', ?, ?)
-                """,
-                (
-                    group_id,
-                    max(0, message_id),
-                    max(0, message_id),
-                    timestamp,
-                    timestamp,
-                ),
-            )
-        return cursor.rowcount > 0
-
-    def list_shadow_batches(self, *, limit: int = 20) -> list[ShadowBatch]:
+    def list_extraction_batches(self, *, limit: int = 20) -> list[ExtractionBatch]:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT * FROM memory_shadow_batches
+                SELECT * FROM memory_extraction_batches
                 ORDER BY batch_id DESC LIMIT ?
                 """,
                 (max(1, min(limit, 200)),),
@@ -1033,16 +953,16 @@ class ClaimStore:
                 if row["legacy_memory_id"] is not None
                 else None
             ),
-            shadow_batch_id=(
-                int(row["shadow_batch_id"])
-                if row["shadow_batch_id"] is not None
+            extraction_batch_id=(
+                int(row["extraction_batch_id"])
+                if row["extraction_batch_id"] is not None
                 else None
             ),
         )
 
     @staticmethod
-    def _batch_from_row(row: sqlite3.Row) -> ShadowBatch:
-        return ShadowBatch(
+    def _batch_from_row(row: sqlite3.Row) -> ExtractionBatch:
+        return ExtractionBatch(
             batch_id=int(row["batch_id"]),
             group_id=int(row["group_id"]),
             first_message_id=int(row["first_message_id"]),
@@ -1077,13 +997,13 @@ def parse_operations(text: str) -> list[Mapping[str, object]]:
     start = stripped.find("{")
     end = stripped.rfind("}")
     if start < 0 or end < start:
-        raise ValueError("shadow extractor did not return JSON")
+        raise ValueError("memory extractor did not return JSON")
     payload = json.loads(stripped[start : end + 1])
     if not isinstance(payload, Mapping):
-        raise ValueError("shadow extractor returned a non-object")
+        raise ValueError("memory extractor returned a non-object")
     operations = payload.get("operations")
     if not isinstance(operations, list):
-        raise ValueError("shadow extractor operations must be an array")
+        raise ValueError("memory extractor operations must be an array")
     return [
         _normalize_operation_fields(item)
         for item in operations

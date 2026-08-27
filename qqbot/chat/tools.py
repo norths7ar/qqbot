@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 
 from qqbot.identity import (
@@ -16,6 +17,7 @@ from qqbot.integrations.web import TavilyClient
 from qqbot.memory import MemoryStore
 from qqbot.runtime.audit import AuditLog
 from qqbot.storage.group_data import GroupDataStore
+
 
 @dataclass(frozen=True, slots=True)
 class ToolSpec:

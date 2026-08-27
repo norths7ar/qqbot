@@ -2,7 +2,7 @@ import nonebot
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
-from qqbot.memory.v2_runtime import claim_store
+from qqbot.memory.runtime import memory_store
 from qqbot.runtime.paths import PROJECT_ROOT
 from qqbot.runtime.process import BotAlreadyRunningError, BotProcessGuard
 
@@ -24,7 +24,7 @@ def main() -> None:
         # second ClaimStore just for readiness metadata.
 
         runtime_state = guard.mark_ready(
-            memory_schema_version=claim_store.schema_version()
+            memory_schema_version=memory_store.claim_store.schema_version()
         )
         logger.info(
             "qqbot runtime ready commit={} pid={} started={} python={} "

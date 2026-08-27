@@ -294,9 +294,7 @@ class ChatClient:
         payload = {
             "model": self._model,
             "messages": [
-                message.as_payload()
-                if isinstance(message, ChatMessage)
-                else message
+                message.as_payload() if isinstance(message, ChatMessage) else message
                 for message in messages
             ],
             "thinking": {"type": "disabled"},

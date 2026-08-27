@@ -2,9 +2,9 @@ import unittest
 from unittest.mock import AsyncMock
 
 from qqbot.integrations.llm import (
+    ChatClient,
     ConversationStore,
     Cooldown,
-    ChatClient,
     extract_response_text,
     extract_tool_calls,
 )
@@ -226,6 +226,7 @@ class ToolCallingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(answer, "北京今天晴。")
         self.assertEqual(executed, [("web_search", {"query": "北京"})])
+
 
 if __name__ == "__main__":
     unittest.main()

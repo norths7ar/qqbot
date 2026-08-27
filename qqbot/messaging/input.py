@@ -60,7 +60,7 @@ class ResolvedMessage:
         return self.prompt_text
 
     def llm_prompt(self) -> str:
-        """Serialize the current turn without allowing body text to forge field labels."""
+        """Serialize a turn without letting body text forge field labels."""
         payload: dict[str, object] = {
             "author": _participant_payload(self.author),
             "body": self.current_body,
@@ -319,7 +319,9 @@ def _message_body_text(message: Message | None) -> str:
         if segment.type == "text":
             parts.append(str(segment.data.get("text", "")))
         elif segment.type != "reply":
-            parts.append(_SEGMENT_PLACEHOLDERS.get(segment.type, f"[{segment.type}消息]"))
+            parts.append(
+                _SEGMENT_PLACEHOLDERS.get(segment.type, f"[{segment.type}消息]")
+            )
     return "".join(parts).strip()[:_MAX_REPLY_BODY_CHARS]
 
 
