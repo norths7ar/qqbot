@@ -15,7 +15,6 @@ _SENSITIVE_KEY_PARTS = (
     "cookie",
     "password",
     "secret",
-    "token",
 )
 
 
@@ -90,7 +89,11 @@ class AuditLog:
 
 def _sanitize(value: object, *, key: str, text_limit: int) -> Any:
     normalized_key = key.casefold()
-    if any(part in normalized_key for part in _SENSITIVE_KEY_PARTS):
+    if (
+        any(part in normalized_key for part in _SENSITIVE_KEY_PARTS)
+        or normalized_key == "token"
+        or normalized_key.endswith("_token")
+    ):
         return "[REDACTED]"
     if isinstance(value, bytes):
         return f"[BYTES:{len(value)}]"

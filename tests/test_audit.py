@@ -40,6 +40,8 @@ class AuditLogTests(unittest.TestCase):
             arguments={
                 "query": "显卡价格",
                 "api_key": "should-not-appear",
+                "access_token": "credential-token",
+                "completion_tokens": 103,
                 "nested": {"Authorization": "Bearer secret-value"},
                 "image": "data:image/png;base64,secret-image-data",
             },
@@ -51,8 +53,11 @@ class AuditLogTests(unittest.TestCase):
 
         self.assertNotIn("should-not-appear", text)
         self.assertNotIn("secret-value", text)
+        self.assertNotIn("credential-token", text)
         self.assertNotIn("secret-image-data", text)
         self.assertEqual(payload["arguments"]["api_key"], "[REDACTED]")
+        self.assertEqual(payload["arguments"]["access_token"], "[REDACTED]")
+        self.assertEqual(payload["arguments"]["completion_tokens"], 103)
         self.assertEqual(
             payload["arguments"]["image"],
             "[REDACTED_IMAGE_DATA]",
