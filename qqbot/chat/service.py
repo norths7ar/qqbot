@@ -20,6 +20,7 @@ from qqbot.chat.tools import (
 from qqbot.integrations.llm import (
     ChatClient,
     ChatMessage,
+    CompletionTrace,
     ConversationStore,
     Cooldown,
     UserContent,
@@ -412,6 +413,32 @@ class ChatService:
                 if isinstance(tool.get("function"), Mapping)
             ],
         )
+        response_round = 0
+
+        def record_response(trace: CompletionTrace) -> None:
+            nonlocal response_round
+            response_round += 1
+            chunk_size = self.audit_log.text_limit
+            max_reasoning_chars = chunk_size * 50
+            bounded_reasoning = trace.reasoning_content[:max_reasoning_chars]
+            self.audit_log.record(
+                "llm.response",
+                trace_id=turn.trace_id,
+                model=self.config.llm_model,
+                response_round=response_round,
+                finish_reason=trace.finish_reason,
+                content_chars=trace.content_length,
+                reasoning_chars=len(trace.reasoning_content),
+                reasoning_truncated=(
+                    len(trace.reasoning_content) > max_reasoning_chars
+                ),
+                reasoning_chunks=[
+                    bounded_reasoning[index : index + chunk_size]
+                    for index in range(0, len(bounded_reasoning), chunk_size)
+                ],
+                usage=trace.usage,
+            )
+
         try:
             answer = await self.client.complete_with_tools(
                 system_prompt=request.system_prompt,
@@ -419,6 +446,7 @@ class ChatService:
                 prompt=request.content,
                 tools=self.chat_tools,
                 execute_tool=self._tool_executor(bot, event, turn.trace_id),
+                response_observer=record_response,
             )
         except (httpx.HTTPError, ValueError) as error:
             fields: dict[str, object] = {

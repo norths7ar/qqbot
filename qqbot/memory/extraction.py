@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from qqbot.integrations.llm import ChatClient
+from qqbot.integrations.llm import ChatClient, CompletionTrace
 from qqbot.memory.v2 import CLAIM_OPERATIONS, ClaimStore, MemoryClaim, parse_operations
 from qqbot.storage.group_data import GroupDataStore, GroupMessageRecord
 
@@ -35,7 +35,9 @@ class MemoryExtractor:
         group_store: GroupDataStore,
         *,
         batch_size: int = 20,
+        max_output_tokens: int = 8192,
         episode_ttl_hours: float = 72,
+        response_observer: Callable[[int, int, CompletionTrace], None] | None = None,
     ) -> None:
         if batch_size < 2:
             raise ValueError("batch_size must be at least 2")
@@ -45,7 +47,9 @@ class MemoryExtractor:
         self.claim_store = claim_store
         self.group_store = group_store
         self.batch_size = batch_size
+        self.max_output_tokens = max_output_tokens
         self.episode_ttl_hours = episode_ttl_hours
+        self.response_observer = response_observer
 
     async def process_available(self, group_id: int) -> ExtractionResult:
         messages = self.group_store.unprocessed_human_messages(
@@ -64,10 +68,17 @@ class MemoryExtractor:
         response = ""
         snapshots: dict[int, Mapping[str, object]] = {}
         try:
+            response_observer = (
+                lambda trace: self.response_observer(group_id, batch_id, trace)
+                if self.response_observer is not None
+                else None
+            )
             response = await self.client.complete(
                 system_prompt=_EXTRACTION_PROMPT,
                 history=[],
                 prompt=_format_input(messages, related),
+                max_output_tokens=self.max_output_tokens,
+                response_observer=response_observer,
             )
             operations = parse_operations(response)
             application = self._apply_operations(

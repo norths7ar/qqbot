@@ -17,7 +17,7 @@ class Config(BaseModel):
     llm_assistant_context_turns: int = Field(default=3, ge=0, le=20)
     llm_context_ttl_hours: float = Field(default=12, ge=0, le=168)
     llm_max_input_chars: int = Field(default=2000, ge=100, le=10000)
-    llm_max_output_tokens: int = Field(default=800, ge=100, le=4000)
+    llm_max_output_tokens: int = Field(default=4096, ge=100, le=8192)
     llm_timeout_seconds: float = Field(default=45, ge=5, le=120)
     llm_cooldown_seconds: float = Field(default=3, ge=0, le=60)
     llm_max_concurrency: int = Field(default=2, ge=1, le=10)
@@ -33,6 +33,7 @@ class Config(BaseModel):
     history_today_enabled: bool = False
     memory_auto_extract_enabled: bool = True
     memory_extract_batch_size: int = Field(default=20, ge=5, le=100)
+    memory_extract_max_output_tokens: int = Field(default=8192, ge=100, le=8192)
     memory_episode_ttl_hours: float = Field(default=72, ge=1, le=720)
     memory_extract_failure_backoff_seconds: float = Field(
         default=300,

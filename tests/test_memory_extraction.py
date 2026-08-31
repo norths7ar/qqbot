@@ -138,6 +138,25 @@ class MemoryExtractionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.claim_store.list_claims(), [])
         self.assertEqual(self.claim_store.list_extraction_batches()[0].status, "failed")
 
+    async def test_extraction_uses_its_own_output_budget(self) -> None:
+        self.group_store.record_message(
+            1, 10, "甲", "第一条", person_id=self.alice.person_id
+        )
+        self.group_store.record_message(
+            1, 11, "乙", "第二条", person_id=self.bob.person_id
+        )
+        extractor = self.extractor_for(
+            '{"operations": []}',
+            max_output_tokens=8192,
+        )
+
+        await extractor.process_available(1)
+
+        self.assertEqual(
+            extractor.client.complete.await_args.kwargs["max_output_tokens"],
+            8192,
+        )
+
     async def test_self_statement_can_supersede_trusted_claim(self) -> None:
         old = self.claim_store.add_claim(
             scope="person",

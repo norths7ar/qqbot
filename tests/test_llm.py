@@ -1,8 +1,9 @@
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from qqbot.integrations.llm import (
     ChatClient,
+    CompletionTrace,
     ConversationStore,
     Cooldown,
     ThinkingMode,
@@ -137,6 +138,46 @@ class ChatClientTests(unittest.IsolatedAsyncioTestCase):
         payload = client._post.await_args.args[0]
         self.assertEqual(payload["thinking"], {"type": "disabled"})
 
+    async def test_complete_supports_per_request_budget_and_response_trace(
+        self,
+    ) -> None:
+        client = self.make_client()
+        observer = Mock()
+        client._post = AsyncMock(  # type: ignore[method-assign]
+            return_value={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": "[]",
+                            "reasoning_content": "先检查输入",
+                        },
+                    }
+                ],
+                "usage": {
+                    "completion_tokens": 103,
+                    "completion_tokens_details": {"reasoning_tokens": 100},
+                },
+            }
+        )
+
+        answer = await client.complete(
+            system_prompt="test",
+            history=[],
+            prompt="test",
+            max_output_tokens=8192,
+            response_observer=observer,
+        )
+
+        self.assertEqual(answer, "[]")
+        self.assertEqual(client._post.await_args.args[0]["max_tokens"], 8192)
+        trace = observer.call_args.args[0]
+        self.assertIsInstance(trace, CompletionTrace)
+        self.assertEqual(trace.finish_reason, "stop")
+        self.assertEqual(trace.content_length, 2)
+        self.assertEqual(trace.reasoning_content, "先检查输入")
+        self.assertEqual(trace.usage["completion_tokens"], 103)
+
     async def test_executes_tool_and_returns_final_answer(self) -> None:
         client = self.make_client()
         client._post = AsyncMock(  # type: ignore[method-assign]
@@ -164,6 +205,7 @@ class ChatClientTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         executed: list[tuple[str, object]] = []
+        observer = Mock()
 
         async def execute(name: str, arguments: object) -> str:
             executed.append((name, arguments))
@@ -175,10 +217,12 @@ class ChatClientTests(unittest.IsolatedAsyncioTestCase):
             prompt="搜索北京",
             tools=[],
             execute_tool=execute,  # type: ignore[arg-type]
+            response_observer=observer,
         )
 
         self.assertEqual(answer, "北京今天晴。")
         self.assertEqual(executed, [("web_search", {"query": "北京"})])
+        self.assertEqual(observer.call_count, 2)
         self.assertNotIn("thinking", client._post.await_args_list[0].args[0])
 
 

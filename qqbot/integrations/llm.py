@@ -51,6 +51,17 @@ class ToolCall:
 type ToolExecutor = Callable[[str, Mapping[str, object]], Awaitable[str]]
 
 
+@dataclass(frozen=True, slots=True)
+class CompletionTrace:
+    finish_reason: str | None
+    content_length: int
+    reasoning_content: str
+    usage: Mapping[str, object]
+
+
+type ResponseObserver = Callable[[CompletionTrace], None]
+
+
 class ConversationStore:
     """Keep a bounded, speaker-labelled working context for each group."""
 
@@ -198,6 +209,8 @@ class ChatClient:
         system_prompt: str,
         history: Sequence[ChatMessage],
         prompt: UserContent,
+        max_output_tokens: int | None = None,
+        response_observer: ResponseObserver | None = None,
     ) -> str:
         messages = [
             ChatMessage(role="system", content=system_prompt),
@@ -210,11 +223,17 @@ class ChatClient:
                 message.as_payload() if isinstance(message, ChatMessage) else message
                 for message in messages
             ],
-            "max_tokens": self._max_output_tokens,
+            "max_tokens": (
+                self._max_output_tokens
+                if max_output_tokens is None
+                else max_output_tokens
+            ),
             "stream": False,
         }
         self._apply_thinking_mode(payload)
         response_payload = await self._post(payload)
+        if response_observer is not None:
+            response_observer(extract_completion_trace(response_payload))
         return extract_response_text(response_payload)
 
     async def complete_with_tools(
@@ -227,6 +246,7 @@ class ChatClient:
         execute_tool: ToolExecutor,
         max_rounds: int = 3,
         tool_choice: str | Mapping[str, object] = "auto",
+        response_observer: ResponseObserver | None = None,
     ) -> str:
         messages: list[dict[str, object]] = [
             ChatMessage(role="system", content=system_prompt).as_payload(),
@@ -244,6 +264,8 @@ class ChatClient:
             }
             self._apply_thinking_mode(payload)
             response_payload = await self._post(payload)
+            if response_observer is not None:
+                response_observer(extract_completion_trace(response_payload))
             message = extract_response_message(response_payload)
             tool_calls = extract_tool_calls(message)
             if not tool_calls:
@@ -301,6 +323,22 @@ def extract_response_text(payload: Mapping[str, object]) -> str:
     if not isinstance(content, str) or not content.strip():
         raise ValueError("LLM response content is empty")
     return content.strip()
+
+
+def extract_completion_trace(payload: Mapping[str, object]) -> CompletionTrace:
+    message = extract_response_message(payload)
+    choices = payload.get("choices")
+    choice = choices[0] if isinstance(choices, list) and choices else {}
+    finish_reason = choice.get("finish_reason") if isinstance(choice, Mapping) else None
+    content = message.get("content")
+    reasoning = message.get("reasoning_content")
+    usage = payload.get("usage")
+    return CompletionTrace(
+        finish_reason=finish_reason if isinstance(finish_reason, str) else None,
+        content_length=len(content) if isinstance(content, str) else 0,
+        reasoning_content=reasoning if isinstance(reasoning, str) else "",
+        usage=usage if isinstance(usage, Mapping) else {},
+    )
 
 
 def extract_response_message(payload: Mapping[str, object]) -> Mapping[str, object]:

@@ -6,7 +6,7 @@ import time
 from nonebot import logger
 
 from qqbot.chat.config import Config
-from qqbot.integrations.llm import ChatClient
+from qqbot.integrations.llm import ChatClient, CompletionTrace
 from qqbot.memory.extraction import MemoryExtractor
 from qqbot.memory.v2 import ClaimStore
 from qqbot.runtime.audit import AuditLog
@@ -32,10 +32,38 @@ class MemoryJobRunner:
             claim_store,
             group_data_store,
             batch_size=config.memory_extract_batch_size,
+            max_output_tokens=config.memory_extract_max_output_tokens,
             episode_ttl_hours=config.memory_episode_ttl_hours,
+            response_observer=self._record_llm_response,
         )
         self.tasks: dict[int, asyncio.Task[None]] = {}
         self.failure_retry_at: dict[int, float] = {}
+
+    def _record_llm_response(
+        self,
+        group_id: int,
+        batch_id: int,
+        trace: CompletionTrace,
+    ) -> None:
+        chunk_size = self.audit_log.text_limit
+        max_reasoning_chars = chunk_size * 50
+        bounded_reasoning = trace.reasoning_content[:max_reasoning_chars]
+        reasoning_chunks = [
+            bounded_reasoning[index : index + chunk_size]
+            for index in range(0, len(bounded_reasoning), chunk_size)
+        ]
+        self.audit_log.record(
+            "memory_extraction.llm_response",
+            group_id=group_id,
+            batch_id=batch_id,
+            max_output_tokens=self.config.memory_extract_max_output_tokens,
+            finish_reason=trace.finish_reason,
+            content_chars=trace.content_length,
+            reasoning_chars=len(trace.reasoning_content),
+            reasoning_truncated=len(trace.reasoning_content) > max_reasoning_chars,
+            reasoning_chunks=reasoning_chunks,
+            usage=trace.usage,
+        )
 
     def schedule(self, group_id: int) -> None:
         if not self.config.memory_auto_extract_enabled:
