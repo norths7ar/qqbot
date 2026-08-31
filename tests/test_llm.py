@@ -5,6 +5,7 @@ from qqbot.integrations.llm import (
     ChatClient,
     ConversationStore,
     Cooldown,
+    ThinkingMode,
     extract_response_text,
     extract_tool_calls,
 )
@@ -98,7 +99,11 @@ class ResponseParsingTests(unittest.TestCase):
 
 
 class ChatClientTests(unittest.IsolatedAsyncioTestCase):
-    def make_client(self) -> ChatClient:
+    def make_client(
+        self,
+        *,
+        thinking_mode: ThinkingMode = "provider_default",
+    ) -> ChatClient:
         return ChatClient(
             api_key="test",
             base_url="https://example.com",
@@ -106,6 +111,7 @@ class ChatClientTests(unittest.IsolatedAsyncioTestCase):
             timeout_seconds=5,
             max_output_tokens=100,
             max_concurrency=1,
+            thinking_mode=thinking_mode,
         )
 
     async def test_complete_returns_raw_text_for_non_chat_consumers(self) -> None:
@@ -119,6 +125,17 @@ class ChatClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer, "**raw**")
         payload = client._post.await_args.args[0]
         self.assertNotIn("thinking", payload)
+
+    async def test_complete_can_disable_provider_thinking(self) -> None:
+        client = self.make_client(thinking_mode="disabled")
+        client._post = AsyncMock(  # type: ignore[method-assign]
+            return_value={"choices": [{"message": {"content": "[]"}}]}
+        )
+
+        await client.complete(system_prompt="test", history=[], prompt="test")
+
+        payload = client._post.await_args.args[0]
+        self.assertEqual(payload["thinking"], {"type": "disabled"})
 
     async def test_executes_tool_and_returns_final_answer(self) -> None:
         client = self.make_client()

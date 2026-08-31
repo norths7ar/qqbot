@@ -12,6 +12,7 @@ import httpx
 
 type Role = Literal["system", "user", "assistant"]
 type UserContent = str | list[dict[str, object]]
+type ThinkingMode = Literal["provider_default", "disabled"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +182,7 @@ class ChatClient:
         timeout_seconds: float,
         max_output_tokens: int,
         max_concurrency: int,
+        thinking_mode: ThinkingMode = "provider_default",
     ) -> None:
         self._api_key = api_key
         self._url = f"{base_url.rstrip('/')}/chat/completions"
@@ -188,6 +190,7 @@ class ChatClient:
         self._timeout = httpx.Timeout(timeout_seconds)
         self._max_output_tokens = max_output_tokens
         self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._thinking_mode = thinking_mode
 
     async def complete(
         self,
@@ -210,6 +213,7 @@ class ChatClient:
             "max_tokens": self._max_output_tokens,
             "stream": False,
         }
+        self._apply_thinking_mode(payload)
         response_payload = await self._post(payload)
         return extract_response_text(response_payload)
 
@@ -238,6 +242,7 @@ class ChatClient:
                 "max_tokens": self._max_output_tokens,
                 "stream": False,
             }
+            self._apply_thinking_mode(payload)
             response_payload = await self._post(payload)
             message = extract_response_message(response_payload)
             tool_calls = extract_tool_calls(message)
@@ -268,6 +273,10 @@ class ChatClient:
                 )
             tool_choice = "auto"
         raise ValueError("LLM exceeded the maximum tool-call rounds")
+
+    def _apply_thinking_mode(self, payload: dict[str, object]) -> None:
+        if self._thinking_mode == "disabled":
+            payload["thinking"] = {"type": "disabled"}
 
     async def _post(self, payload: Mapping[str, object]) -> Mapping[str, object]:
         headers = {

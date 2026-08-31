@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, SecretStr
 
 from qqbot.chat.prompts import DEFAULT_SYSTEM_PROMPT
@@ -9,6 +11,7 @@ class Config(BaseModel):
     llm_api_key: SecretStr
     llm_base_url: str = Field(min_length=1)
     llm_model: str = Field(min_length=1)
+    llm_thinking_mode: Literal["provider_default", "disabled"] = "provider_default"
     allowed_groups: frozenset[int] = frozenset()
     llm_context_turns: int = Field(default=50, ge=5, le=200)
     llm_assistant_context_turns: int = Field(default=3, ge=0, le=20)
@@ -31,6 +34,11 @@ class Config(BaseModel):
     memory_auto_extract_enabled: bool = True
     memory_extract_batch_size: int = Field(default=20, ge=5, le=100)
     memory_episode_ttl_hours: float = Field(default=72, ge=1, le=720)
+    memory_extract_failure_backoff_seconds: float = Field(
+        default=300,
+        ge=0,
+        le=86400,
+    )
     audit_log_enabled: bool = True
     audit_log_max_bytes: int = Field(
         default=5 * 1024 * 1024,

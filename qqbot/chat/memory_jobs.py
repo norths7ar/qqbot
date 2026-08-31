@@ -35,9 +35,12 @@ class MemoryJobRunner:
             episode_ttl_hours=config.memory_episode_ttl_hours,
         )
         self.tasks: dict[int, asyncio.Task[None]] = {}
+        self.failure_retry_at: dict[int, float] = {}
 
     def schedule(self, group_id: int) -> None:
         if not self.config.memory_auto_extract_enabled:
+            return
+        if time.monotonic() < self.failure_retry_at.get(group_id, 0):
             return
         existing = self.tasks.get(group_id)
         if existing is not None and not existing.done():
@@ -68,6 +71,8 @@ class MemoryJobRunner:
                 if result.processed_messages < self.config.memory_extract_batch_size:
                     break
         except Exception as error:
+            backoff_seconds = self.config.memory_extract_failure_backoff_seconds
+            self.failure_retry_at[group_id] = time.monotonic() + backoff_seconds
             logger.exception("Background memory extraction failed group={}", group_id)
             self.audit_log.record(
                 "memory_extraction.failed",
@@ -76,8 +81,10 @@ class MemoryJobRunner:
                 processed_messages=total_processed,
                 error_type=type(error).__name__,
                 error=str(error),
+                retry_after_seconds=backoff_seconds,
             )
         else:
+            self.failure_retry_at.pop(group_id, None)
             self.audit_log.record(
                 "memory_extraction.completed",
                 group_id=group_id,

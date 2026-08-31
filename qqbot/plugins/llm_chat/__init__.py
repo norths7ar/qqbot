@@ -57,6 +57,7 @@ client = ChatClient(
     timeout_seconds=plugin_config.llm_timeout_seconds,
     max_output_tokens=plugin_config.llm_max_output_tokens,
     max_concurrency=plugin_config.llm_max_concurrency,
+    thinking_mode=plugin_config.llm_thinking_mode,
 )
 tavily = TavilyClient(plugin_config.tavily_api_key.get_secret_value())
 image_loader = ImageContentLoader(
