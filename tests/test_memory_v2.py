@@ -168,6 +168,58 @@ class ClaimStoreTests(unittest.TestCase):
             {online.claim_id, admin.claim_id, legacy.claim_id},
         )
 
+    def test_repairs_online_episode_expiration_and_evidence_attribution(self) -> None:
+        store = self.make_store()
+        episode = store.add_claim(
+            scope="person",
+            group_id=1,
+            subject_person_id="alice",
+            predicate="activity",
+            object_text="在看比赛",
+            asserted_by_person_id=None,
+            kind="episode",
+            status="candidate",
+            source_type="self_statement",
+            confidence=0.8,
+            importance=1,
+            origin="online_v2",
+        )
+        store.add_evidence(
+            episode.claim_id,
+            1,
+            asserted_by_person_id="bob",
+            evidence_type="self_statement",
+        )
+        store.add_evidence(
+            episode.claim_id,
+            2,
+            asserted_by_person_id="alice",
+            evidence_type="self_statement",
+        )
+        store.add_evidence(
+            episode.claim_id,
+            3,
+            asserted_by_person_id="bob",
+            evidence_type="dispute",
+        )
+
+        expiration_count = store.backfill_online_episode_expirations(72)
+        evidence_count = store.repair_online_evidence_attribution()
+
+        repaired = store.get_claim(episode.claim_id)
+        self.assertEqual(expiration_count, 1)
+        self.assertEqual(evidence_count, 2)
+        self.assertIsNotNone(repaired)
+        self.assertIsNotNone(repaired.valid_to)
+        self.assertEqual(repaired.asserted_by_person_id, "alice")
+        self.assertEqual(
+            [
+                item.evidence_type
+                for item in store.evidence_for_claim(episode.claim_id)
+            ],
+            ["third_party", "self_statement", "dispute"],
+        )
+
     def test_failed_extraction_batch_rolls_back_new_and_modified_claims(self) -> None:
         store = self.make_store()
         original = self.add_person_claim(store)

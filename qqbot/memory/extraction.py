@@ -51,6 +51,13 @@ class MemoryExtractor:
         self.episode_ttl_hours = episode_ttl_hours
         self.response_observer = response_observer
 
+    def has_complete_batch(self, group_id: int) -> bool:
+        messages = self.group_store.unprocessed_human_messages(
+            group_id,
+            limit=self.batch_size,
+        )
+        return len(messages) >= self.batch_size
+
     async def process_available(self, group_id: int) -> ExtractionResult:
         messages = self.group_store.unprocessed_human_messages(
             group_id,
@@ -209,7 +216,7 @@ class MemoryExtractor:
         )
         kind = str(raw.get("kind", "")).strip()
         valid_to = _optional_text(raw.get("valid_to"))
-        if scope == "group" and kind == "episode" and valid_to is None:
+        if kind == "episode" and valid_to is None:
             valid_to = (
                 datetime.now(UTC) + timedelta(hours=self.episode_ttl_hours)
             ).isoformat(timespec="seconds")
@@ -218,7 +225,7 @@ class MemoryExtractor:
             kind=kind,
             self_statement=self_statement,
         )
-        asserted_by = _single_assertor(evidence)
+        asserted_by = subject if self_statement else _single_assertor(evidence)
         claim = self.claim_store.add_claim(
             scope=scope,
             group_id=group_id,
@@ -238,11 +245,18 @@ class MemoryExtractor:
             extraction_batch_id=batch_id,
         )
         for message in evidence:
+            evidence_type = (
+                "group_observation"
+                if scope == "group"
+                else "self_statement"
+                if message.person_id == subject
+                else "third_party"
+            )
             self.claim_store.add_evidence(
                 claim.claim_id,
                 message.message_id,
                 asserted_by_person_id=message.person_id,
-                evidence_type=source_type,
+                evidence_type=evidence_type,
                 extraction_batch_id=batch_id,
             )
         return claim, None
@@ -430,4 +444,6 @@ confidence、importance、source_message_ids，可选valid_from、valid_to。
 5. 先对照existing_claims：同一事实不要重复insert；本人确认候选用confirm；
    出现反驳用dispute；明确的新事实替代旧事实才用supersede。
 6. 不确定时ignore。宁可漏记，也不要把玩笑或推断固化成人物事实。
+7. 事实必须由引用消息直接蕴含。看到结果、片段、截图或转述，不等于本人正在参与、
+   观看或持续关注相关活动；条件、计划、假设和过去片段也不能改写为当前状态。
 """.strip()

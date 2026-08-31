@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from qqbot.memory import MemoryStore
-from qqbot.memory.extraction import MemoryExtractor
+from qqbot.memory.extraction import MemoryExtractor, _EXTRACTION_PROMPT
 from qqbot.storage.group_data import GroupDataStore
 
 
@@ -234,6 +234,70 @@ class MemoryExtractionTests(unittest.IsolatedAsyncioTestCase):
         remaining_hours = (expires - datetime.now(UTC)).total_seconds() / 3600
         self.assertGreater(remaining_hours, 23.9)
         self.assertLessEqual(remaining_hours, 24)
+
+    async def test_person_episode_gets_default_expiration(self) -> None:
+        first = self.group_store.record_message(
+            1, 10, "甲", "今晚在加班", person_id=self.alice.person_id
+        )
+        self.group_store.record_message(
+            1, 11, "乙", "辛苦了", person_id=self.bob.person_id
+        )
+        response = json.dumps(
+            {
+                "operations": [
+                    {
+                        "operation": "insert",
+                        "scope": "person",
+                        "subject_person_id": self.alice.person_id,
+                        "predicate": "activity",
+                        "object_text": "今晚在加班",
+                        "kind": "episode",
+                        "source_message_ids": [first],
+                    }
+                ]
+            }
+        )
+
+        await self.extractor_for(response).process_available(1)
+
+        self.assertIsNotNone(self.claim_store.list_claims(limit=1)[0].valid_to)
+
+    async def test_mixed_evidence_keeps_per_message_attribution(self) -> None:
+        question = self.group_store.record_message(
+            1, 11, "乙", "你在看比赛吗？", person_id=self.bob.person_id
+        )
+        confirmation = self.group_store.record_message(
+            1, 10, "甲", "嗯", person_id=self.alice.person_id
+        )
+        response = json.dumps(
+            {
+                "operations": [
+                    {
+                        "operation": "insert",
+                        "scope": "person",
+                        "subject_person_id": self.alice.person_id,
+                        "predicate": "activity",
+                        "object_text": "在看比赛",
+                        "kind": "episode",
+                        "source_message_ids": [question, confirmation],
+                    }
+                ]
+            }
+        )
+
+        await self.extractor_for(response).process_available(1)
+
+        claim = self.claim_store.list_claims(limit=1)[0]
+        evidence = self.claim_store.evidence_for_claim(claim.claim_id)
+        self.assertEqual(claim.asserted_by_person_id, self.alice.person_id)
+        self.assertEqual(
+            [item.evidence_type for item in evidence],
+            ["third_party", "self_statement"],
+        )
+
+    def test_prompt_rejects_weak_activity_inference(self) -> None:
+        self.assertIn("事实必须由引用消息直接蕴含", _EXTRACTION_PROMPT)
+        self.assertIn("不等于本人正在参与", _EXTRACTION_PROMPT)
 
     async def test_bot_messages_are_not_sent_to_extractor(self) -> None:
         self.group_store.record_message(

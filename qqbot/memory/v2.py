@@ -5,7 +5,7 @@ import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from qqbot.storage.sqlite import ensure_column
@@ -338,6 +338,123 @@ class ClaimStore:
             )
             for row in rows
         ]
+
+    def backfill_online_episode_expirations(self, ttl_hours: float) -> int:
+        if ttl_hours <= 0:
+            raise ValueError("ttl_hours must be positive")
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT claim_id, observed_at, created_at
+                FROM memory_claims
+                WHERE origin = 'online_v2' AND kind = 'episode'
+                  AND valid_to IS NULL
+                """
+            ).fetchall()
+            for row in rows:
+                reference_text = str(row["observed_at"] or row["created_at"])
+                reference = datetime.fromisoformat(reference_text)
+                if reference.tzinfo is None:
+                    reference = reference.replace(tzinfo=UTC)
+                valid_to = (reference + timedelta(hours=ttl_hours)).isoformat(
+                    timespec="seconds"
+                )
+                connection.execute(
+                    "UPDATE memory_claims SET valid_to = ?, updated_at = ? "
+                    "WHERE claim_id = ?",
+                    (valid_to, _now(), int(row["claim_id"])),
+                )
+        return len(rows)
+
+    def repair_online_evidence_attribution(self) -> int:
+        repaired = 0
+        with self._connect() as connection:
+            claims = connection.execute(
+                """
+                SELECT claim_id, scope, subject_person_id, source_type,
+                       asserted_by_person_id
+                FROM memory_claims
+                WHERE origin = 'online_v2'
+                """
+            ).fetchall()
+            for claim in claims:
+                claim_id = int(claim["claim_id"])
+                scope = str(claim["scope"])
+                subject = (
+                    str(claim["subject_person_id"])
+                    if claim["subject_person_id"]
+                    else None
+                )
+                evidence = connection.execute(
+                    """
+                    SELECT evidence_id, asserted_by_person_id, evidence_type
+                    FROM memory_claim_evidence
+                    WHERE claim_id = ? AND evidence_type IN (
+                        'self_statement', 'third_party', 'group_observation'
+                    )
+                    ORDER BY evidence_id
+                    """,
+                    (claim_id,),
+                ).fetchall()
+                if not evidence:
+                    continue
+                assertors = {
+                    str(row["asserted_by_person_id"])
+                    for row in evidence
+                    if row["asserted_by_person_id"]
+                }
+                self_statement = bool(subject) and subject in assertors
+                source_type = (
+                    "group_observation"
+                    if scope == "group"
+                    else "self_statement"
+                    if self_statement
+                    else "third_party"
+                )
+                asserted_by = (
+                    subject
+                    if self_statement
+                    else next(iter(assertors))
+                    if len(assertors) == 1
+                    else None
+                )
+                if (
+                    claim["source_type"] != source_type
+                    or claim["asserted_by_person_id"] != asserted_by
+                ):
+                    connection.execute(
+                        """
+                        UPDATE memory_claims
+                        SET source_type = ?, asserted_by_person_id = ?, updated_at = ?
+                        WHERE claim_id = ?
+                        """,
+                        (source_type, asserted_by, _now(), claim_id),
+                    )
+                    repaired += 1
+                for row in evidence:
+                    evidence_assertor = (
+                        str(row["asserted_by_person_id"])
+                        if row["asserted_by_person_id"]
+                        else None
+                    )
+                    evidence_type = (
+                        "group_observation"
+                        if scope == "group"
+                        else "self_statement"
+                        if evidence_assertor == subject
+                        else "third_party"
+                    )
+                    if row["evidence_type"] == evidence_type:
+                        continue
+                    connection.execute(
+                        """
+                        UPDATE memory_claim_evidence SET evidence_type = ?
+                        WHERE evidence_id = ?
+                        """,
+                        (evidence_type, int(row["evidence_id"])),
+                    )
+                    repaired += 1
+        return repaired
 
     def add_evidence(
         self,

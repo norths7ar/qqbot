@@ -38,6 +38,16 @@ class MemoryJobRunner:
         )
         self.tasks: dict[int, asyncio.Task[None]] = {}
         self.failure_retry_at: dict[int, float] = {}
+        expiration_count = claim_store.backfill_online_episode_expirations(
+            config.memory_episode_ttl_hours
+        )
+        evidence_count = claim_store.repair_online_evidence_attribution()
+        if expiration_count or evidence_count:
+            audit_log.record(
+                "memory_extraction.metadata_repaired",
+                episode_expirations=expiration_count,
+                evidence_attributions=evidence_count,
+            )
 
     def _record_llm_response(
         self,
@@ -69,6 +79,8 @@ class MemoryJobRunner:
         if not self.config.memory_auto_extract_enabled:
             return
         if time.monotonic() < self.failure_retry_at.get(group_id, 0):
+            return
+        if not self.memory_extractor.has_complete_batch(group_id):
             return
         existing = self.tasks.get(group_id)
         if existing is not None and not existing.done():

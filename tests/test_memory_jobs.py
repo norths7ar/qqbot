@@ -17,11 +17,14 @@ class MemoryJobRunnerTests(unittest.IsolatedAsyncioTestCase):
         )
         audit_log = Mock()
         audit_log.text_limit = 100
+        claim_store = Mock()
+        claim_store.backfill_online_episode_expirations.return_value = 0
+        claim_store.repair_online_evidence_attribution.return_value = 0
         runner = MemoryJobRunner(
             config=config,
             audit_log=audit_log,
             client=Mock(),
-            claim_store=Mock(),
+            claim_store=claim_store,
             group_data_store=Mock(),
         )
         return runner
@@ -31,6 +34,7 @@ class MemoryJobRunnerTests(unittest.IsolatedAsyncioTestCase):
         runner.memory_extractor.process_available = AsyncMock(
             side_effect=ValueError("empty")
         )
+        runner.memory_extractor.has_complete_batch = Mock(return_value=True)
 
         with (
             patch("qqbot.chat.memory_jobs.time.monotonic", return_value=100),
@@ -49,6 +53,16 @@ class MemoryJobRunnerTests(unittest.IsolatedAsyncioTestCase):
         create_task.call_args.args[0].close()
         self.assertNotIn(1, runner.tasks)
         self.assertIn(2, runner.tasks)
+
+    def test_incomplete_batch_is_not_scheduled_or_logged(self) -> None:
+        runner = self.make_runner()
+        runner.memory_extractor.has_complete_batch = Mock(return_value=False)
+
+        with patch("qqbot.chat.memory_jobs.asyncio.create_task") as create_task:
+            runner.schedule(1)
+
+        create_task.assert_not_called()
+        runner.audit_log.record.assert_not_called()
 
     async def test_successful_extraction_clears_failure_backoff(self) -> None:
         runner = self.make_runner()
