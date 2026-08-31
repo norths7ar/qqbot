@@ -63,9 +63,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.command == "status":
         claims = store.list_claims(limit=1000)
         candidates = sum(claim.status == "candidate" for claim in claims)
-        serving = sum(
-            claim.origin in {"legacy_v1", "online_v2", "admin_v2"} for claim in claims
-        )
+        serving = len(store.list_serving_claims(limit=1000))
         print(f"schema_version={store.schema_version()}")
         print(f"claims={len(claims)} serving={serving} candidates={candidates}")
         print(f"extraction_batches={len(store.list_extraction_batches(limit=200))}")
@@ -147,11 +145,12 @@ def _print_claims(claims: Sequence[MemoryClaim]) -> None:
     for claim in claims:
         subject = claim.subject_person_id or f"group:{claim.group_id}"
         assertor = claim.asserted_by_person_id or "-"
+        validity = f" valid_to={claim.valid_to}" if claim.valid_to else ""
         print(
             f"#{claim.claim_id} [{claim.status}/{claim.kind}/{claim.origin}] "
             f"subject={subject} assertor={assertor} "
             f"confidence={claim.confidence:.2f} importance={claim.importance} "
-            f"{claim.content}"
+            f"{claim.content}{validity}"
         )
 
 
