@@ -71,9 +71,7 @@ audit_log.record(
     llm_model=plugin_config.llm_model,
     llm_thinking_mode=plugin_config.llm_thinking_mode,
     chat_max_output_tokens=plugin_config.llm_max_output_tokens,
-    memory_extract_max_output_tokens=(
-        plugin_config.memory_extract_max_output_tokens
-    ),
+    memory_extract_max_output_tokens=(plugin_config.memory_extract_max_output_tokens),
     web_search_available=tavily.available,
     memory_schema_version=claim_store.schema_version(),
 )

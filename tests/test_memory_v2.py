@@ -213,10 +213,7 @@ class ClaimStoreTests(unittest.TestCase):
         self.assertIsNotNone(repaired.valid_to)
         self.assertEqual(repaired.asserted_by_person_id, "alice")
         self.assertEqual(
-            [
-                item.evidence_type
-                for item in store.evidence_for_claim(episode.claim_id)
-            ],
+            [item.evidence_type for item in store.evidence_for_claim(episode.claim_id)],
             ["third_party", "self_statement", "dispute"],
         )
 

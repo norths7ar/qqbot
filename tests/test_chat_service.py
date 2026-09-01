@@ -26,7 +26,8 @@ class _FakeClient:
 
 
 class _FakeMemoryJobs:
-    tasks: dict[int, asyncio.Task[None]] = {}
+    def __init__(self) -> None:
+        self.tasks: dict[int, asyncio.Task[None]] = {}
 
 
 class ChatServiceInputBoundaryTests(unittest.TestCase):

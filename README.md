@@ -102,11 +102,18 @@ uv run python -m qqbot.memory_admin batches
 uv run python -m qqbot.memory_admin show 记忆编号
 ```
 
+### 待决策
+
+- [ ] 未提取消息达到每群保留上限时，优先保证消息留存，还是优先保证长期记忆最终完整？
+- [ ] 群聊低活跃时，是否应在空闲一段时间后提取不足一个批次的尾部消息？需要权衡模型调用成本与记忆及时性。
+- [ ] 候选记忆是否继续允许模型按需召回？如果允许，需要通过群聊回放确认模型会稳定保留不确定性。
+
 ## 日志与验证
 
 运行日志位于 `data/logs/`，结构化审计日志为 `data/logs/qqbot-audit.jsonl`。同一条聊天链路使用 `trace_id` 关联消息解析、工具、模型、回复和后台记忆任务；API Key、图片二进制和 base64 不写入日志。
 
 ```powershell
 uv run python -m unittest discover -s tests -v
-uvx ruff check bot.py qqbot tests
+uv run ruff check bot.py qqbot tests
+uv run ruff format --check bot.py qqbot tests
 ```

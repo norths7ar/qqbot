@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from qqbot.memory import MemoryStore
-from qqbot.memory.extraction import MemoryExtractor, _EXTRACTION_PROMPT
+from qqbot.memory.extraction import _EXTRACTION_PROMPT, MemoryExtractor
 from qqbot.storage.group_data import GroupDataStore
 
 

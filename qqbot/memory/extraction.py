@@ -75,11 +75,13 @@ class MemoryExtractor:
         response = ""
         snapshots: dict[int, Mapping[str, object]] = {}
         try:
-            response_observer = (
-                lambda trace: self.response_observer(group_id, batch_id, trace)
-                if self.response_observer is not None
-                else None
-            )
+            response_observer = None
+            observer = self.response_observer
+            if observer is not None:
+
+                def response_observer(trace: CompletionTrace) -> None:
+                    observer(group_id, batch_id, trace)
+
             response = await self.client.complete(
                 system_prompt=_EXTRACTION_PROMPT,
                 history=[],
