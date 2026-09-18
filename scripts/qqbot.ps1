@@ -77,32 +77,6 @@ function Get-ListeningProcessIds {
     return @($processIds | Sort-Object -Unique)
 }
 
-function Get-LegacyBotProcess {
-    $configuredPort = Get-ConfiguredPort
-    $candidates = @()
-    foreach ($processId in (Get-ListeningProcessIds -Port $configuredPort)) {
-        try {
-            $process = Get-Process -Id $processId -ErrorAction Stop
-            $actualPython = [System.IO.Path]::GetFullPath($process.Path)
-            if ($actualPython -eq $PythonPath -or
-                ($VenvBasePython -and $actualPython -eq $VenvBasePython)) {
-                $candidates += $process
-            }
-        }
-        catch {
-            continue
-        }
-    }
-
-    if ($candidates.Count -eq 1) {
-        return [PSCustomObject]@{
-            Process = $candidates[0]
-            Port = $configuredPort
-        }
-    }
-    return $null
-}
-
 function Normalize-ProcessPathEnvironment {
     $variables = [System.Environment]::GetEnvironmentVariables()
     $pathKeys = @(
@@ -152,7 +126,7 @@ function Get-WorkspaceGitCommit {
 
 function Get-ValidatedBotProcess {
     $state = Read-BotState
-    if ($null -eq $state) {
+    if ($null -eq $state -or $state.state_version -ne 2 -or -not $state.instance_id) {
         return $null
     }
 
@@ -174,31 +148,22 @@ function Get-ValidatedBotProcess {
         ).ToUniversalTime()
         $startDelta = ($recordedStart - $actualStart).TotalSeconds
 
-        $legacyState = -not $state.PSObject.Properties["entrypoint"]
-        if ($legacyState) {
-            if ([math]::Abs($startDelta) -ge 2) {
-                return $null
-            }
+        $recordedEntrypoint = [System.IO.Path]::GetFullPath(
+            [string]$state.entrypoint
+        )
+        if ($recordedEntrypoint -ne $botPath) {
+            return $null
         }
-        else {
-            $recordedEntrypoint = [System.IO.Path]::GetFullPath(
-                [string]$state.entrypoint
-            )
-            if ($recordedEntrypoint -ne $botPath) {
-                return $null
-            }
-            if ($startDelta -lt -1 -or $startDelta -gt 30) {
-                return $null
-            }
-            if (-not (Test-BotLockHeld)) {
-                return $null
-            }
+        if ($startDelta -lt -1 -or $startDelta -gt 30) {
+            return $null
+        }
+        if (-not (Test-BotLockHeld)) {
+            return $null
         }
 
         return [PSCustomObject]@{
             Process = $process
             State = $state
-            Legacy = $legacyState
         }
     }
     catch {
@@ -264,9 +229,28 @@ function Get-RecentLogPaths {
         }
     }
 
-    return [PSCustomObject]@{
-        Stdout = Join-Path $logDirectory "qqbot.stdout.log"
-        Stderr = Join-Path $logDirectory "qqbot.stderr.log"
+    return $null
+}
+
+function Remove-OldRunLogs {
+    param([string]$CurrentStdoutPath = "")
+
+    $currentRun = [System.IO.Path]::GetFileName($CurrentStdoutPath) -replace '\.stdout\.log$', ''
+    $runs = Get-ChildItem -LiteralPath $logDirectory -File |
+        Where-Object { $_.Name -match '^qqbot-\d{8}-\d{6}-\d{3}\.(stdout|stderr)\.log$' } |
+        Group-Object { $_.Name -replace '\.(stdout|stderr)\.log$', '' } |
+        Sort-Object Name -Descending
+    $oldRuns = $runs |
+        Where-Object { $_.Name -ne $currentRun } |
+        Select-Object -Skip 2
+    foreach ($run in $oldRuns) {
+        foreach ($file in $run.Group) {
+            $target = [System.IO.Path]::GetFullPath($file.FullName)
+            if ([System.IO.Path]::GetDirectoryName($target) -ne $logDirectory) {
+                throw "Log cleanup target is outside the log directory."
+            }
+            Remove-Item -LiteralPath $target
+        }
     }
 }
 
@@ -293,15 +277,6 @@ function Start-Bot {
     $existing = Get-ValidatedBotProcess
     if ($null -ne $existing) {
         Write-Output "qqbot is already running. PID: $($existing.Process.Id)"
-        return
-    }
-    $legacy = Get-LegacyBotProcess
-    if ($null -ne $legacy) {
-        Write-Output (
-            "qqbot is already running as a legacy unmanaged process. " +
-            "PID: $($legacy.Process.Id). Port: $($legacy.Port). " +
-            "Use restart to replace it with a managed instance."
-        )
         return
     }
     if (Test-BotLockHeld) {
@@ -392,6 +367,13 @@ function Start-Bot {
         throw $message
     }
 
+    try {
+        Remove-OldRunLogs -CurrentStdoutPath $stdoutPath
+    }
+    catch {
+        Write-Warning "qqbot started, but old log cleanup failed: $_"
+    }
+
     Write-Output "qqbot started in background. PID: $($process.Id)"
     Write-Output "Stdout: $stdoutPath"
     Write-Output "Stderr: $stderrPath"
@@ -402,18 +384,6 @@ function Stop-Bot {
     if ($null -eq $managed) {
         if (Test-BotLockHeld) {
             throw "qqbot runtime lock is held, but its process state is invalid. Refusing to stop an unidentified process."
-        }
-        $legacy = Get-LegacyBotProcess
-        if ($null -ne $legacy) {
-            $legacyPid = $legacy.Process.Id
-            Stop-Process -Id $legacyPid -ErrorAction Stop
-            $legacy.Process.WaitForExit(10000) | Out-Null
-            Remove-StaleState
-            Write-Output (
-                "qqbot legacy process stopped. PID: $legacyPid. " +
-                "It was identified by port $($legacy.Port) and the exact qqbot Python interpreter."
-            )
-            return
         }
         Remove-StaleState
         Write-Output "qqbot is not running."
@@ -437,43 +407,18 @@ function Stop-Bot {
 function Show-BotStatus {
     $managed = Get-ValidatedBotProcess
     if ($null -ne $managed) {
-        $stateKind = if ($managed.Legacy) { "legacy" } else { "current" }
         $state = $managed.State
-        $stateReady = if ($state.PSObject.Properties["ready"]) {
-            [string]$state.ready
-        }
-        else { "unknown" }
-        $runtimeCommit = if ($state.PSObject.Properties["git_commit"]) {
-            [string]$state.git_commit
-        }
-        else { "unknown" }
+        $runtimeCommit = [string]$state.git_commit
         $workspaceCommit = Get-WorkspaceGitCommit
-        $schema = if ($state.PSObject.Properties["memory_schema_version"]) {
-            [string]$state.memory_schema_version
-        }
-        else { "unknown" }
-        $pythonPrefix = if ($state.PSObject.Properties["python_prefix"]) {
-            [string]$state.python_prefix
-        }
-        else { "unknown" }
-        Write-Output "qqbot is running. PID: $($managed.Process.Id). State: $stateKind."
+        Write-Output "qqbot is running. PID: $($managed.Process.Id)."
         Write-Output "Commit: $runtimeCommit (workspace HEAD: $workspaceCommit)"
-        Write-Output "Started: $([string]$state.started_at). Ready: $stateReady. ReadyAt: $([string]$state.ready_at)"
-        Write-Output "Python: $([string]$state.python). Prefix: $pythonPrefix. Memory schema: $schema"
+        Write-Output "Started: $([string]$state.started_at). Ready: $($state.ready). ReadyAt: $([string]$state.ready_at)"
+        Write-Output "Python: $([string]$state.python). Prefix: $($state.python_prefix). Memory schema: $($state.memory_schema_version)"
         if ($runtimeCommit -ne "unknown" -and
             $workspaceCommit -ne "unknown" -and
             $runtimeCommit -ne $workspaceCommit) {
             Write-Warning "Running commit differs from workspace HEAD. Manual restart is required; no automatic restart will be attempted."
         }
-        return
-    }
-    $legacy = Get-LegacyBotProcess
-    if ($null -ne $legacy) {
-        Write-Output (
-            "qqbot is running as a legacy unmanaged process. " +
-            "PID: $($legacy.Process.Id). Started: $($legacy.Process.StartTime). " +
-            "Port: $($legacy.Port)."
-        )
         return
     }
     if (Test-BotLockHeld) {
@@ -488,12 +433,12 @@ function Show-BotStatus {
 function Show-BotLogs {
     $paths = Get-RecentLogPaths
     $shown = $false
-    if ($paths.Stdout -and (Test-Path -LiteralPath $paths.Stdout)) {
+    if ($null -ne $paths -and $paths.Stdout -and (Test-Path -LiteralPath $paths.Stdout)) {
         Write-Output "=== stdout: $($paths.Stdout) ==="
         Get-Content -LiteralPath $paths.Stdout -Tail 80 -Encoding utf8
         $shown = $true
     }
-    if ($paths.Stderr -and (Test-Path -LiteralPath $paths.Stderr)) {
+    if ($null -ne $paths -and $paths.Stderr -and (Test-Path -LiteralPath $paths.Stderr)) {
         Write-Output "=== stderr: $($paths.Stderr) ==="
         Get-Content -LiteralPath $paths.Stderr -Tail 80 -Encoding utf8
         $shown = $true

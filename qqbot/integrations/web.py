@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -75,36 +74,6 @@ class TavilyClient:
         if not isinstance(data, dict):
             raise ValueError("Tavily response is invalid")
         return data
-
-
-async def history_today(*, now: datetime | None = None, limit: int = 8) -> str:
-    local_now = (now or datetime.now(LOCAL_TIMEZONE)).astimezone(LOCAL_TIMEZONE)
-    endpoint = (
-        "https://api.wikimedia.org/feed/v1/wikipedia/zh/onthisday/all/"
-        f"{local_now.month:02d}/{local_now.day:02d}"
-    )
-    headers = {"User-Agent": USER_AGENT, "Api-User-Agent": USER_AGENT}
-    async with httpx.AsyncClient(timeout=20, headers=headers) as client:
-        response = await client.get(endpoint)
-        response.raise_for_status()
-    payload = response.json()
-    events = payload.get("events") if isinstance(payload, Mapping) else None
-    if not isinstance(events, list) or not events:
-        return "今天暂时没有查到历史事件。"
-
-    selected = sorted(
-        (event for event in events if isinstance(event, Mapping)),
-        key=lambda event: int(event.get("year", 0)),
-        reverse=True,
-    )[: max(1, min(limit, 12))]
-    lines = [f"历史上的今天（{local_now.month}月{local_now.day}日）"]
-    for event in selected:
-        year = event.get("year", "未知年份")
-        text = _clean_text(event.get("text"))
-        if text:
-            lines.append(f"{year}年：{text}")
-    lines.append("来源：维基媒体 On this day")
-    return "\n".join(lines)
 
 
 def find_bilibili_reference(text: str) -> str | None:

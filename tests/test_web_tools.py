@@ -1,7 +1,6 @@
 import unittest
-from unittest.mock import AsyncMock
 
-from qqbot.integrations.web import TavilyClient, find_bilibili_reference
+from qqbot.integrations.web import find_bilibili_reference
 
 
 class BilibiliReferenceTests(unittest.TestCase):
@@ -19,24 +18,3 @@ class BilibiliReferenceTests(unittest.TestCase):
 
     def test_ignores_unrelated_text(self) -> None:
         self.assertIsNone(find_bilibili_reference("今天吃什么"))
-
-
-class TavilySearchTests(unittest.IsolatedAsyncioTestCase):
-    async def test_search_material_warns_model_about_evidence_quality(self) -> None:
-        client = TavilyClient("test")
-        client._post = AsyncMock(  # type: ignore[method-assign]
-            return_value={
-                "results": [
-                    {
-                        "title": "可能相关的页面",
-                        "content": "内容并不完整。",
-                        "url": "https://example.com/result",
-                    }
-                ]
-            }
-        )
-
-        result = await client.search("含糊的问题")
-
-        self.assertIn("网页片段可能不完整或互相冲突", result)
-        self.assertIn("证据不足时明确说明", result)

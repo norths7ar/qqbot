@@ -30,7 +30,6 @@ class Config(BaseModel):
     )
     media_download_timeout_seconds: float = Field(default=45, ge=5, le=120)
     bilibili_auto_parse_enabled: bool = False
-    history_today_enabled: bool = False
     memory_auto_extract_enabled: bool = True
     memory_extract_batch_size: int = Field(default=20, ge=5, le=100)
     memory_extract_max_output_tokens: int = Field(default=8192, ge=100, le=8192)
