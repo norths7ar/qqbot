@@ -5,7 +5,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from qqbot.memory.v2 import ClaimStore, MemoryClaim
+from qqbot.memory.claims import ClaimStore, MemoryClaim
 from qqbot.runtime.paths import PROJECT_ROOT
 from qqbot.storage.group_data import GroupDataStore
 

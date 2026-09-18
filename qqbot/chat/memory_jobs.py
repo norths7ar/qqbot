@@ -7,8 +7,8 @@ from nonebot import logger
 
 from qqbot.chat.config import Config
 from qqbot.integrations.llm import ChatClient, CompletionTrace
+from qqbot.memory.claims import ClaimStore
 from qqbot.memory.extraction import MemoryExtractor
-from qqbot.memory.v2 import ClaimStore
 from qqbot.runtime.audit import AuditLog
 from qqbot.storage.group_data import GroupDataStore
 
@@ -38,16 +38,6 @@ class MemoryJobRunner:
         )
         self.tasks: dict[int, asyncio.Task[None]] = {}
         self.failure_retry_at: dict[int, float] = {}
-        expiration_count = claim_store.backfill_online_episode_expirations(
-            config.memory_episode_ttl_hours
-        )
-        evidence_count = claim_store.repair_online_evidence_attribution()
-        if expiration_count or evidence_count:
-            audit_log.record(
-                "memory_extraction.metadata_repaired",
-                episode_expirations=expiration_count,
-                evidence_attributions=evidence_count,
-            )
 
     def _record_llm_response(
         self,

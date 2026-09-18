@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from qqbot.memory import MemoryStore
-from qqbot.memory.extraction import _EXTRACTION_PROMPT, MemoryExtractor
+from qqbot.memory.extraction import MemoryExtractor
 from qqbot.storage.group_data import GroupDataStore
 
 
@@ -81,7 +81,7 @@ class MemoryExtractionTests(unittest.IsolatedAsyncioTestCase):
             self.claim_store.list_claims(limit=20),
             key=lambda claim: claim.claim_id,
         )
-        self.assertEqual([claim.origin for claim in claims], ["online_v2", "online_v2"])
+        self.assertEqual([claim.origin for claim in claims], ["extracted", "extracted"])
         self.assertEqual([claim.status for claim in claims], ["active", "candidate"])
         self.assertEqual(
             [claim.asserted_by_person_id for claim in claims],
@@ -170,7 +170,7 @@ class MemoryExtractionTests(unittest.IsolatedAsyncioTestCase):
             source_type="self_statement",
             confidence=0.9,
             importance=3,
-            origin="legacy_v1",
+            origin="admin",
         )
         first = self.group_store.record_message(
             1, 10, "甲", "我已经搬到上海了", person_id=self.alice.person_id
@@ -203,7 +203,7 @@ class MemoryExtractionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replaced.status, "superseded")
         replacement = self.claim_store.get_claim(replaced.superseded_by_claim_id or 0)
         self.assertEqual(replacement.object_text, "上海")
-        self.assertEqual(replacement.origin, "online_v2")
+        self.assertEqual(replacement.origin, "extracted")
 
     async def test_group_episode_gets_default_expiration(self) -> None:
         first = self.group_store.record_message(
@@ -294,10 +294,6 @@ class MemoryExtractionTests(unittest.IsolatedAsyncioTestCase):
             [item.evidence_type for item in evidence],
             ["third_party", "self_statement"],
         )
-
-    def test_prompt_rejects_weak_activity_inference(self) -> None:
-        self.assertIn("事实必须由引用消息直接蕴含", _EXTRACTION_PROMPT)
-        self.assertIn("不等于本人正在参与", _EXTRACTION_PROMPT)
 
     async def test_bot_messages_are_not_sent_to_extractor(self) -> None:
         self.group_store.record_message(

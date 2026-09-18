@@ -26,6 +26,7 @@ data/*.db
 data/*.db-*
 data/logs/
 data/runtime/
+data/backups/
 
 # Editors and operating systems
 .idea/

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from qqbot.storage.sqlite import ensure_column
+from qqbot.storage.sqlite import initialize_schema
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +37,8 @@ class GroupDataStore:
     def initialize(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
-            connection.executescript(
+            initialize_schema(
+                connection,
                 """
                 CREATE TABLE IF NOT EXISTS group_messages (
                     message_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +46,9 @@ class GroupDataStore:
                     user_id INTEGER NOT NULL,
                     user_name TEXT NOT NULL,
                     content TEXT NOT NULL,
-                    sent_at TEXT NOT NULL
+                    sent_at TEXT NOT NULL,
+                    person_id TEXT NOT NULL DEFAULT '',
+                    speaker_role TEXT NOT NULL DEFAULT 'human'
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_group_messages_group_time
@@ -56,16 +59,7 @@ class GroupDataStore:
                     last_message_id INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT NOT NULL
                 );
-                """
-            )
-            ensure_column(
-                connection, "group_messages", "person_id", "TEXT NOT NULL DEFAULT ''"
-            )
-            ensure_column(
-                connection,
-                "group_messages",
-                "speaker_role",
-                "TEXT NOT NULL DEFAULT 'human'",
+                """,
             )
 
     def record_message(

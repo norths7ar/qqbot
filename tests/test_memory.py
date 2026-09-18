@@ -53,7 +53,7 @@ people:
 
         claim = store.claim_store.get_claim(entry.memory_id)
         self.assertIsNotNone(claim)
-        self.assertEqual(claim.origin, "admin_v2")
+        self.assertEqual(claim.origin, "admin")
         self.assertIn("喜欢喝无糖可乐", store.search_context(1, "无糖可乐"))
         self.assertNotIn("喜欢喝无糖可乐", store.search_context(2, "无糖可乐"))
         self.assertNotIn("喜欢喝无糖可乐", store.prompt_context(10001))

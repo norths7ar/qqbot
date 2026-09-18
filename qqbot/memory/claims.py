@@ -5,12 +5,11 @@ import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
-from qqbot.storage.sqlite import ensure_column
+from qqbot.storage.sqlite import initialize_schema
 
-MEMORY_V2_SCHEMA_VERSION = 3
 CLAIM_SCOPES = frozenset({"person", "group"})
 CLAIM_KINDS = frozenset({"profile", "preference", "relationship", "episode", "lore"})
 CLAIM_STATUSES = frozenset(
@@ -23,21 +22,10 @@ CLAIM_SOURCES = frozenset(
         "third_party",
         "group_observation",
         "inferred",
-        "legacy_v1",
     }
 )
 CLAIM_OPERATIONS = frozenset(
     {"insert", "confirm", "update", "dispute", "supersede", "ignore"}
-)
-
-_V1_MIRROR_TRIGGER_NAMES = (
-    "trg_v1_person_memory_insert",
-    "trg_v1_person_memory_update",
-    "trg_v1_person_memory_delete",
-    "trg_v1_group_memory_insert",
-    "trg_v1_group_memory_update",
-    "trg_v1_group_memory_delete",
-    "trg_v1_memory_evidence_insert",
 )
 
 
@@ -62,13 +50,11 @@ class MemoryClaim:
     updated_at: str
     superseded_by_claim_id: int | None
     origin: str
-    legacy_scope: str | None
-    legacy_memory_id: int | None
     extraction_batch_id: int | None
 
     @property
     def content(self) -> str:
-        if self.predicate.startswith("legacy_") or self.predicate == "admin_memory":
+        if self.predicate == "admin_memory":
             return self.object_text
         return f"{self.predicate}：{self.object_text}"
 
@@ -106,14 +92,9 @@ class ClaimStore:
     def initialize(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
-            connection.executescript(
+            initialize_schema(
+                connection,
                 """
-                CREATE TABLE IF NOT EXISTS memory_schema_migrations (
-                    version INTEGER PRIMARY KEY,
-                    description TEXT NOT NULL,
-                    applied_at TEXT NOT NULL
-                );
-
                 CREATE TABLE IF NOT EXISTS memory_claims (
                     claim_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     scope TEXT NOT NULL,
@@ -133,17 +114,14 @@ class ClaimStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     superseded_by_claim_id INTEGER,
-                    origin TEXT NOT NULL,
-                    legacy_scope TEXT,
-                    legacy_memory_id INTEGER,
+                    origin TEXT NOT NULL CHECK(origin IN ('admin', 'extracted')),
                     extraction_batch_id INTEGER,
                     CHECK(scope IN ('person', 'group')),
                     CHECK(status IN (
                         'candidate', 'active', 'disputed', 'superseded', 'rejected'
                     )),
                     CHECK(confidence >= 0 AND confidence <= 1),
-                    CHECK(importance >= 1 AND importance <= 5),
-                    UNIQUE(legacy_scope, legacy_memory_id)
+                    CHECK(importance >= 1 AND importance <= 5)
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_memory_claims_group_subject
@@ -159,6 +137,7 @@ class ClaimStore:
                     asserted_by_person_id TEXT,
                     evidence_type TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    extraction_batch_id INTEGER,
                     UNIQUE(claim_id, group_message_id, evidence_type)
                 );
 
@@ -177,40 +156,12 @@ class ClaimStore:
                     completed_at TEXT,
                     UNIQUE(group_id, first_message_id, last_message_id)
                 );
-                """
-            )
-            ensure_column(connection, "memory_claims", "extraction_batch_id", "INTEGER")
-            ensure_column(
-                connection, "memory_claim_evidence", "extraction_batch_id", "INTEGER"
-            )
-            current_version = int(
-                connection.execute(
-                    "SELECT COALESCE(MAX(version), 0) FROM memory_schema_migrations"
-                ).fetchone()[0]
-            )
-            if current_version < MEMORY_V2_SCHEMA_VERSION:
-                self._migrate_v1_rows(connection)
-            for trigger_name in _V1_MIRROR_TRIGGER_NAMES:
-                connection.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO memory_schema_migrations(
-                    version, description, applied_at
-                ) VALUES (?, ?, ?)
                 """,
-                (
-                    MEMORY_V2_SCHEMA_VERSION,
-                    "make claims the authoritative memory store",
-                    _now(),
-                ),
             )
 
     def schema_version(self) -> int:
         with self._connect() as connection:
-            row = connection.execute(
-                "SELECT COALESCE(MAX(version), 0) FROM memory_schema_migrations"
-            ).fetchone()
-        return int(row[0])
+            return int(connection.execute("PRAGMA user_version").fetchone()[0])
 
     def add_claim(
         self,
@@ -229,7 +180,7 @@ class ClaimStore:
         valid_from: str | None = None,
         valid_to: str | None = None,
         observed_at: str | None = None,
-        origin: str = "online_v2",
+        origin: str = "extracted",
         extraction_batch_id: int | None = None,
     ) -> MemoryClaim:
         self._validate_claim(
@@ -339,123 +290,6 @@ class ClaimStore:
             for row in rows
         ]
 
-    def backfill_online_episode_expirations(self, ttl_hours: float) -> int:
-        if ttl_hours <= 0:
-            raise ValueError("ttl_hours must be positive")
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT claim_id, observed_at, created_at
-                FROM memory_claims
-                WHERE origin = 'online_v2' AND kind = 'episode'
-                  AND valid_to IS NULL
-                """
-            ).fetchall()
-            for row in rows:
-                reference_text = str(row["observed_at"] or row["created_at"])
-                reference = datetime.fromisoformat(reference_text)
-                if reference.tzinfo is None:
-                    reference = reference.replace(tzinfo=UTC)
-                valid_to = (reference + timedelta(hours=ttl_hours)).isoformat(
-                    timespec="seconds"
-                )
-                connection.execute(
-                    "UPDATE memory_claims SET valid_to = ?, updated_at = ? "
-                    "WHERE claim_id = ?",
-                    (valid_to, _now(), int(row["claim_id"])),
-                )
-        return len(rows)
-
-    def repair_online_evidence_attribution(self) -> int:
-        repaired = 0
-        with self._connect() as connection:
-            claims = connection.execute(
-                """
-                SELECT claim_id, scope, subject_person_id, source_type,
-                       asserted_by_person_id
-                FROM memory_claims
-                WHERE origin = 'online_v2'
-                """
-            ).fetchall()
-            for claim in claims:
-                claim_id = int(claim["claim_id"])
-                scope = str(claim["scope"])
-                subject = (
-                    str(claim["subject_person_id"])
-                    if claim["subject_person_id"]
-                    else None
-                )
-                evidence = connection.execute(
-                    """
-                    SELECT evidence_id, asserted_by_person_id, evidence_type
-                    FROM memory_claim_evidence
-                    WHERE claim_id = ? AND evidence_type IN (
-                        'self_statement', 'third_party', 'group_observation'
-                    )
-                    ORDER BY evidence_id
-                    """,
-                    (claim_id,),
-                ).fetchall()
-                if not evidence:
-                    continue
-                assertors = {
-                    str(row["asserted_by_person_id"])
-                    for row in evidence
-                    if row["asserted_by_person_id"]
-                }
-                self_statement = bool(subject) and subject in assertors
-                source_type = (
-                    "group_observation"
-                    if scope == "group"
-                    else "self_statement"
-                    if self_statement
-                    else "third_party"
-                )
-                asserted_by = (
-                    subject
-                    if self_statement
-                    else next(iter(assertors))
-                    if len(assertors) == 1
-                    else None
-                )
-                if (
-                    claim["source_type"] != source_type
-                    or claim["asserted_by_person_id"] != asserted_by
-                ):
-                    connection.execute(
-                        """
-                        UPDATE memory_claims
-                        SET source_type = ?, asserted_by_person_id = ?, updated_at = ?
-                        WHERE claim_id = ?
-                        """,
-                        (source_type, asserted_by, _now(), claim_id),
-                    )
-                    repaired += 1
-                for row in evidence:
-                    evidence_assertor = (
-                        str(row["asserted_by_person_id"])
-                        if row["asserted_by_person_id"]
-                        else None
-                    )
-                    evidence_type = (
-                        "group_observation"
-                        if scope == "group"
-                        else "self_statement"
-                        if evidence_assertor == subject
-                        else "third_party"
-                    )
-                    if row["evidence_type"] == evidence_type:
-                        continue
-                    connection.execute(
-                        """
-                        UPDATE memory_claim_evidence SET evidence_type = ?
-                        WHERE evidence_id = ?
-                        """,
-                        (evidence_type, int(row["evidence_id"])),
-                    )
-                    repaired += 1
-        return repaired
-
     def add_evidence(
         self,
         claim_id: int,
@@ -505,7 +339,6 @@ class ClaimStore:
     ) -> list[MemoryClaim]:
         current = (now or datetime.now(UTC)).isoformat(timespec="seconds")
         clauses = [
-            "origin IN ('legacy_v1', 'online_v2', 'admin_v2')",
             "status IN ('active', 'candidate', 'disputed')",
             "(valid_to IS NULL OR valid_to > ?)",
         ]
@@ -633,7 +466,6 @@ class ClaimStore:
                     f"""
                     SELECT * FROM memory_claims
                     WHERE (group_id = ? OR group_id IS NULL)
-                      AND origin IN ('legacy_v1', 'online_v2', 'admin_v2')
                       AND status IN ('active', 'candidate', 'disputed')
                       AND (valid_to IS NULL OR valid_to > ?)
                       AND (subject_person_id IN ({placeholders}) OR scope = 'group')
@@ -647,7 +479,6 @@ class ClaimStore:
                     """
                     SELECT * FROM memory_claims
                     WHERE (group_id = ? OR group_id IS NULL)
-                      AND origin IN ('legacy_v1', 'online_v2', 'admin_v2')
                       AND status IN ('active', 'candidate', 'disputed')
                       AND (valid_to IS NULL OR valid_to > ?)
                     ORDER BY updated_at DESC
@@ -812,151 +643,6 @@ class ClaimStore:
             ).fetchall()
         return [self._claim_from_row(row) for row in rows]
 
-    def _migrate_v1_rows(self, connection: sqlite3.Connection) -> None:
-        tables = {
-            str(row["name"])
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
-        }
-        if "memories" in tables:
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO memory_claims(
-                    scope, group_id, subject_person_id, predicate, object_text,
-                    asserted_by_person_id, kind, status, source_type, confidence,
-                    importance, valid_from, valid_to, observed_at, created_at,
-                    updated_at, origin, legacy_scope, legacy_memory_id
-                )
-                SELECT 'person', group_id, person_id, 'legacy_person_memory', content,
-                       NULL, kind, status, source_type,
-                       CASE WHEN source_type = 'admin_config' THEN 1.0
-                            WHEN source_type = 'self_statement' THEN 0.9
-                            ELSE 0.5 END,
-                       3, NULL, expires_at, created_at, created_at,
-                       COALESCE(updated_at, created_at), 'legacy_v1', 'person',
-                       memory_id
-                FROM memories
-                """
-            )
-        if "group_memories" in tables:
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO memory_claims(
-                    scope, group_id, subject_person_id, predicate, object_text,
-                    asserted_by_person_id, kind, status, source_type, confidence,
-                    importance, valid_from, valid_to, observed_at, created_at,
-                    updated_at, origin, legacy_scope, legacy_memory_id
-                )
-                SELECT 'group', group_id, NULL, 'legacy_group_memory', content,
-                       NULL, kind, status, source_type, 0.7, importance,
-                       NULL, expires_at, created_at, created_at, updated_at,
-                       'legacy_v1', 'group', memory_id
-                FROM group_memories
-                """
-            )
-        if "memory_evidence" in tables:
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO memory_claim_evidence(
-                    claim_id, group_message_id, asserted_by_person_id,
-                    evidence_type, created_at
-                )
-                SELECT c.claim_id, e.group_message_id, e.asserted_by_person_id,
-                       e.evidence_type, e.created_at
-                FROM memory_evidence e
-                JOIN memory_claims c
-                  ON c.legacy_scope = e.memory_scope
-                 AND c.legacy_memory_id = e.memory_id
-                """
-            )
-        if "memories" in tables:
-            connection.execute(
-                """
-                UPDATE memory_claims
-                SET group_id = (
-                        SELECT m.group_id FROM memories m
-                        WHERE m.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    subject_person_id = (
-                        SELECT m.person_id FROM memories m
-                        WHERE m.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    object_text = (
-                        SELECT m.content FROM memories m
-                        WHERE m.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    kind = (
-                        SELECT m.kind FROM memories m
-                        WHERE m.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    status = (
-                        SELECT m.status FROM memories m
-                        WHERE m.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    source_type = (
-                        SELECT m.source_type FROM memories m
-                        WHERE m.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    valid_to = (
-                        SELECT m.expires_at FROM memories m
-                        WHERE m.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    updated_at = (
-                        SELECT COALESCE(m.updated_at, m.created_at) FROM memories m
-                        WHERE m.memory_id = memory_claims.legacy_memory_id
-                    )
-                WHERE legacy_scope = 'person'
-                  AND EXISTS (
-                      SELECT 1 FROM memories m
-                      WHERE m.memory_id = memory_claims.legacy_memory_id
-                  )
-                """
-            )
-        if "group_memories" in tables:
-            connection.execute(
-                """
-                UPDATE memory_claims
-                SET group_id = (
-                        SELECT g.group_id FROM group_memories g
-                        WHERE g.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    object_text = (
-                        SELECT g.content FROM group_memories g
-                        WHERE g.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    kind = (
-                        SELECT g.kind FROM group_memories g
-                        WHERE g.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    status = (
-                        SELECT g.status FROM group_memories g
-                        WHERE g.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    source_type = (
-                        SELECT g.source_type FROM group_memories g
-                        WHERE g.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    importance = (
-                        SELECT g.importance FROM group_memories g
-                        WHERE g.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    valid_to = (
-                        SELECT g.expires_at FROM group_memories g
-                        WHERE g.memory_id = memory_claims.legacy_memory_id
-                    ),
-                    updated_at = (
-                        SELECT g.updated_at FROM group_memories g
-                        WHERE g.memory_id = memory_claims.legacy_memory_id
-                    )
-                WHERE legacy_scope = 'group'
-                  AND EXISTS (
-                      SELECT 1 FROM group_memories g
-                      WHERE g.memory_id = memory_claims.legacy_memory_id
-                  )
-                """
-            )
-
     @staticmethod
     def _validate_claim(
         *,
@@ -1023,12 +709,6 @@ class ClaimStore:
                 else None
             ),
             origin=str(row["origin"]),
-            legacy_scope=str(row["legacy_scope"]) if row["legacy_scope"] else None,
-            legacy_memory_id=(
-                int(row["legacy_memory_id"])
-                if row["legacy_memory_id"] is not None
-                else None
-            ),
             extraction_batch_id=(
                 int(row["extraction_batch_id"])
                 if row["extraction_batch_id"] is not None

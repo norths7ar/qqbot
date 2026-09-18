@@ -18,8 +18,6 @@ class MemoryJobRunnerTests(unittest.IsolatedAsyncioTestCase):
         audit_log = Mock()
         audit_log.text_limit = 100
         claim_store = Mock()
-        claim_store.backfill_online_episode_expirations.return_value = 0
-        claim_store.repair_online_evidence_attribution.return_value = 0
         runner = MemoryJobRunner(
             config=config,
             audit_log=audit_log,

@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from qqbot.memory.admin import main
-from qqbot.memory.v2 import ClaimStore
+from qqbot.memory.claims import ClaimStore
 
 
 class MemoryAdminTests(unittest.TestCase):
@@ -36,7 +36,7 @@ class MemoryAdminTests(unittest.TestCase):
                     confidence=1,
                     importance=1,
                     valid_to=valid_to,
-                    origin="online_v2",
+                    origin="extracted",
                 )
             output = io.StringIO()
 

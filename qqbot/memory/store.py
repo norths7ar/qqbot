@@ -10,7 +10,7 @@ from typing import Any
 
 import yaml
 
-from qqbot.memory.v2 import ClaimStore, MemoryClaim
+from qqbot.memory.claims import ClaimStore, MemoryClaim
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +55,7 @@ class MemoryStore:
         self.claim_store = ClaimStore(database_path)
 
     def initialize(self) -> None:
-        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self.claim_store.initialize()
         with self._connect() as connection:
             connection.executescript(
                 """
@@ -72,8 +72,6 @@ class MemoryStore:
                 );
                 """
             )
-        # Migrate V1 rows before people.yaml can merge provisional identities.
-        self.claim_store.initialize()
         self.sync_people_file()
 
     def sync_people_file(self) -> int:
@@ -198,7 +196,7 @@ class MemoryStore:
             confidence=1.0,
             importance=3,
             valid_to=expires_at,
-            origin="admin_v2",
+            origin="admin",
         )
         return self._memory_from_claim(claim)
 

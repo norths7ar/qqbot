@@ -1,51 +1,52 @@
 import sqlite3
 import unittest
 
-from qqbot.storage.sqlite import ensure_column
+from qqbot.storage.sqlite import SCHEMA_VERSION, initialize_schema
 
 
-class EnsureColumnTests(unittest.TestCase):
+class DatabaseSchemaTests(unittest.TestCase):
     def setUp(self) -> None:
         self.connection = sqlite3.connect(":memory:")
-        self.connection.row_factory = sqlite3.Row
-        self.connection.execute("CREATE TABLE records (record_id INTEGER)")
+        self.addCleanup(self.connection.close)
 
-    def tearDown(self) -> None:
-        self.connection.close()
+    def test_new_database_initializes_once_and_preserves_records(self) -> None:
+        schema = "CREATE TABLE records (record_id INTEGER PRIMARY KEY);"
+        initialize_schema(self.connection, schema)
+        with self.connection:
+            self.connection.execute("INSERT INTO records VALUES (7)")
+        initialize_schema(self.connection, schema)
 
-    def test_adds_allowed_column_declaration(self) -> None:
-        ensure_column(
-            self.connection,
-            "records",
-            "speaker_role",
-            "TEXT NOT NULL DEFAULT 'human'",
+        self.assertEqual(
+            self.connection.execute("PRAGMA user_version").fetchone()[0],
+            SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT * FROM records").fetchall(), [(7,)]
         )
 
-        columns = {
-            row["name"]
-            for row in self.connection.execute(
-                'PRAGMA table_info("records")'
-            ).fetchall()
-        }
-        self.assertIn("speaker_role", columns)
+    def test_existing_unrecognized_database_is_rejected_without_changes(self) -> None:
+        with self.connection:
+            self.connection.execute("CREATE TABLE records (record_id INTEGER)")
+            self.connection.execute("INSERT INTO records VALUES (7)")
+        before = list(self.connection.iterdump())
 
-    def test_rejects_identifier_injection(self) -> None:
-        with self.assertRaisesRegex(ValueError, "identifier"):
-            ensure_column(
-                self.connection,
-                "records; DROP TABLE records",
-                "extra",
-                "TEXT",
-            )
+        with self.assertRaisesRegex(ValueError, "Unsupported database format"):
+            initialize_schema(self.connection, "CREATE TABLE extra (value TEXT);")
 
-    def test_rejects_arbitrary_declaration(self) -> None:
-        with self.assertRaisesRegex(ValueError, "declaration"):
-            ensure_column(
-                self.connection,
-                "records",
-                "extra",
-                "TEXT; DROP TABLE records",
-            )
+        self.assertEqual(list(self.connection.iterdump()), before)
+        self.assertEqual(
+            self.connection.execute("PRAGMA user_version").fetchone()[0], 0
+        )
+
+    def test_unknown_version_is_rejected(self) -> None:
+        self.connection.execute("PRAGMA user_version = 999")
+
+        with self.assertRaisesRegex(ValueError, "Unsupported database format"):
+            initialize_schema(self.connection, "CREATE TABLE records (value TEXT);")
+
+        self.assertEqual(
+            self.connection.execute("SELECT name FROM sqlite_master").fetchall(), []
+        )
 
 
 if __name__ == "__main__":

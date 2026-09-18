@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from qqbot.integrations.llm import ChatClient, CompletionTrace
-from qqbot.memory.v2 import CLAIM_OPERATIONS, ClaimStore, MemoryClaim, parse_operations
+from qqbot.memory.claims import (
+    CLAIM_OPERATIONS,
+    ClaimStore,
+    MemoryClaim,
+    parse_operations,
+)
 from qqbot.storage.group_data import GroupDataStore, GroupMessageRecord
 
 
@@ -243,7 +248,7 @@ class MemoryExtractor:
             valid_from=_optional_text(raw.get("valid_from")),
             valid_to=valid_to,
             observed_at=evidence[-1].sent_at,
-            origin="online_v2",
+            origin="extracted",
             extraction_batch_id=batch_id,
         )
         for message in evidence:
@@ -279,11 +284,7 @@ class MemoryExtractor:
             return 0, "invalid target claim id"
         target = self.claim_store.get_claim(target_id)
         evidence = _evidence_messages(raw, by_id)
-        if (
-            target is None
-            or target.group_id != group_id
-            or target.origin not in {"legacy_v1", "online_v2", "admin_v2"}
-        ):
+        if target is None or target.group_id != group_id:
             return 0, "target claim is unavailable in this group"
         if not evidence:
             return 0, "no valid source messages in this batch"
